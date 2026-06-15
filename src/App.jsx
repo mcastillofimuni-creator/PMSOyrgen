@@ -29,6 +29,28 @@ const DIAS = ["Sáb", "Dom", "Lun", "Mar", "Mié", "Jue", "Vie"];
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const EMPRESAS_DEFAULT = ["MAGNEX", "UNITELEC", "SEFREL", "DIM", "T&D ELECTRIC", "MAQUIRENTAS"];
 const MAX_FILE = 3.5 * 1024 * 1024;
+// Storage compatible con Vercel usando localStorage
+const storage = {
+  async get(key) {
+    const value = localStorage.getItem(key);
+    return value ? { value } : null;
+  },
+  async set(key, value) {
+    localStorage.setItem(key, value);
+  },
+  async delete(key) {
+    localStorage.removeItem(key);
+  },
+  async list(prefix) {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(prefix)) keys.push(key);
+    }
+    return { keys };
+  },
+};
+
 
 // ─── Semana Sáb–Vie ───
 function saturdayOf(date) {
@@ -62,13 +84,13 @@ const fmtKB = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.
 async function listSubs(weekId) {
   let keys = [];
   try {
-    const r = await window.storage.list(`sub:${weekId}:`, true);
+    const r = await storage.list(`sub:${weekId}:`, true);
     keys = r?.keys || [];
   } catch { return []; }
   const subs = [];
   for (const k of keys) {
     try {
-      const r = await window.storage.get(k, true);
+      const r = await storage.get(k, true);
       if (r?.value) subs.push(JSON.parse(r.value));
     } catch {}
   }
@@ -106,26 +128,26 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get("config:empresas", true);
+        const r = await storage.get("config:empresas", true);
         if (r?.value) setEmpresas(JSON.parse(r.value));
       } catch {
-        try { await window.storage.set("config:empresas", JSON.stringify(EMPRESAS_DEFAULT), true); } catch {}
+        try { await storage.set("config:empresas", JSON.stringify(EMPRESAS_DEFAULT), true); } catch {}
       }
     })();
   }, []);
 
   const saveEmpresas = async (list) => {
     setEmpresas(list);
-    try { await window.storage.set("config:empresas", JSON.stringify(list), true); } catch {}
+    try { await storage.set("config:empresas", JSON.stringify(list), true); } catch {}
   };
 
   const updateSub = async (id, mutate) => {
     const key = `sub:${wk.id}:${id}`;
     try {
-      const r = await window.storage.get(key, true);
+      const r = await storage.get(key, true);
       const s = JSON.parse(r.value);
       mutate(s);
-      await window.storage.set(key, JSON.stringify(s), true);
+      await storage.set(key, JSON.stringify(s), true);
       setSubs((prev) => prev.map((x) => (x.id === id ? s : x)));
     } catch {
       notify("No se pudo actualizar. Intenta de nuevo.", "err");
@@ -143,8 +165,8 @@ export default function App() {
   const deleteSub = async (sub) => {
     if (!window.confirm(`¿Eliminar el registro de ${sub.empresa} (${sub.expositor})?`)) return;
     try {
-      await window.storage.delete(`sub:${wk.id}:${sub.id}`, true);
-      if (sub.fileKey) { try { await window.storage.delete(sub.fileKey, true); } catch {} }
+      await storage.delete(`sub:${wk.id}:${sub.id}`, true);
+      if (sub.fileKey) { try { await storage.delete(sub.fileKey, true); } catch {} }
       setSubs((prev) => prev.filter((x) => x.id !== sub.id));
       notify("Registro eliminado.");
     } catch { notify("No se pudo eliminar.", "err"); }
@@ -152,7 +174,7 @@ export default function App() {
 
   const downloadFile = async (sub) => {
     try {
-      const r = await window.storage.get(sub.fileKey, true);
+      const r = await storage.get(sub.fileKey, true);
       const bin = atob(r.value);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -274,13 +296,13 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
           r.readAsDataURL(file);
         });
         fileKey = `file:${id}`;
-        await window.storage.set(fileKey, base64, true);
+        await storage.set(fileKey, base64, true);
       }
       const sub = {
         id, empresa: emp, expositor: expositor.trim(), dias, presento: [],
         fileName: file ? file.name : null, fileSize: file ? file.size : 0, fileKey, uploadedAt: Date.now(),
       };
-      await window.storage.set(`sub:${wk.id}:${id}`, JSON.stringify(sub), true);
+      await storage.set(`sub:${wk.id}:${id}`, JSON.stringify(sub), true);
       onSaved();
     } catch {
       notify("No se pudo guardar. Verifica tu conexión e intenta de nuevo.", "err");
@@ -558,7 +580,7 @@ function ActaSection({ wk, subs, empresas, faltantes, notify }) {
     setActa(""); setTranscript(""); setGenAt(null);
     (async () => {
       try {
-        const r = await window.storage.get(`acta:${wk.id}`, true);
+        const r = await storage.get(`acta:${wk.id}`, true);
         if (r?.value) {
           const d = JSON.parse(r.value);
           setActa(d.acta || ""); setTranscript(d.transcript || ""); setGenAt(d.generatedAt || null);
@@ -618,7 +640,7 @@ Reglas: no inventes información que no esté en la transcripción ni en los dat
       setActa(texto);
       const now = Date.now();
       setGenAt(now);
-      try { await window.storage.set(`acta:${wk.id}`, JSON.stringify({ transcript, acta: texto, generatedAt: now }), true); } catch {}
+      try { await storage.set(`acta:${wk.id}`, JSON.stringify({ transcript, acta: texto, generatedAt: now }), true); } catch {}
       notify("Acta generada y guardada.");
     } catch {
       notify("No se pudo generar el acta. Intenta de nuevo.", "err");
