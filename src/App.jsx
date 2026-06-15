@@ -204,7 +204,7 @@ export default function App() {
             <span style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 22, letterSpacing: 1, color: C.orangeLight, textTransform: "uppercase" }}>
               Reunión semanal de proveedores
             </span>
-            <span style={{ fontSize: 13, color: "#9AA7B2" }}>Mantenimiento Eléctrico · Orygen</span>
+            <span style={{ fontSize: 13, color: "#9AA7B2" }}>Planificación de Mantenimiento · Orygen</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
             <button onClick={() => setOffset(offset - 1)} aria-label="Semana anterior"
