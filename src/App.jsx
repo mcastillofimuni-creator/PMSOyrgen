@@ -22,6 +22,8 @@ const C = {
   amberBg: "#FCF3DC",
 };
 
+const CENTRALES = ["C. T. Santa Rosa", "C.C. Ventanilla"];
+
 const FONT = "'Barlow', system-ui, sans-serif";
 const FONT_COND = "'Barlow Condensed', 'Barlow', system-ui, sans-serif";
 
@@ -117,6 +119,7 @@ async function listSubs(weekId) {
     id: row.id,
     empresa: row.proveedor || "",
     expositor: row.expositor || "",
+    centralPresentada: row.central_presentada || "",
     dias: Array.isArray(row.dias) ? row.dias : [],
     presento: Array.isArray(row.presento) ? row.presento : [],
     fileName: row.archivo_nombre || null,
@@ -410,6 +413,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
   const [empresa, setEmpresa] = useState("");
   const [otra, setOtra] = useState("");
   const [expositor, setExpositor] = useState("");
+  const [central, setCentral] = useState("");
   const [dias, setDias] = useState([]);
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -422,6 +426,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
 
     if (!emp) return notify("Selecciona o escribe el nombre de la empresa.", "err");
     if (!expositor.trim()) return notify("Escribe el nombre del expositor.", "err");
+    if (!central) return notify("Selecciona la central a la que corresponde el programa.", "err");
     if (dias.length === 0) return notify("Marca al menos un día de presencia en planta.", "err");
     if (file && file.size > MAX_FILE) return notify(`El archivo supera ${fmtKB(MAX_FILE)}. Reduce su tamaño.`, "err");
 
@@ -458,6 +463,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
           semana: wk.id,
           proveedor: emp,
           expositor: expositor.trim(),
+          central_presentada: central,
           dias,
           presento: [],
           archivo_nombre: archivoNombre,
@@ -473,6 +479,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
       setEmpresa("");
       setOtra("");
       setExpositor("");
+      setCentral("");
       setDias([]);
       setFile(null);
 
@@ -546,6 +553,22 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
           placeholder="Nombre y apellido"
           style={field}
         />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={label}>Central a presentar</label>
+        <select value={central} onChange={(e) => setCentral(e.target.value)} style={field}>
+          <option value="">Seleccionar central…</option>
+          {CENTRALES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+
+        <div style={{ fontSize: 12, color: C.slate, marginTop: 6 }}>
+          Si el Excel tiene varias hojas, selecciona la central principal a la que corresponde esta presentación.
+        </div>
       </div>
 
       <div style={{ marginBottom: 16 }}>
@@ -673,10 +696,10 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
         <Vacio texto="Aún no hay programas registrados esta semana. Comparte el enlace con los proveedores." />
       ) : (
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflowX: "auto", marginBottom: 8 }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 640, fontSize: 13 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 720, fontSize: 13 }}>
             <thead>
               <tr>
-                <th style={{ ...thBase, textAlign: "left", position: "sticky", left: 0, background: C.navy, minWidth: 150 }}>Empresa / Expositor</th>
+                <th style={{ ...thBase, textAlign: "left", position: "sticky", left: 0, background: C.navy, minWidth: 190 }}>Empresa / Expositor</th>
                 {DIAS.map((d, i) => (
                   <th key={d} style={{ ...thBase, background: i === hoyIdx ? C.orange : C.navy }}>
                     <div>{d}</div>
@@ -700,6 +723,9 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
                   >
                     <div style={{ fontWeight: 700 }}>{s.empresa}</div>
                     <div style={{ fontSize: 12, color: C.slate }}>{s.expositor}</div>
+                    <div style={{ fontSize: 11, color: C.orange, marginTop: 2, fontWeight: 700 }}>
+                      {s.centralPresentada || "Central no indicada"}
+                    </div>
                     {s.estadoValidacion && (
                       <div style={{ fontSize: 11, color: C.slate, marginTop: 2 }}>
                         Estado: {s.estadoValidacion}
@@ -877,6 +903,10 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
                   {s.empresa} <span style={{ fontWeight: 500, color: C.slate }}>· {s.expositor}</span>
                 </div>
 
+                <div style={{ fontSize: 12, color: C.orange, marginTop: 2, fontWeight: 700 }}>
+                  Central declarada: {s.centralPresentada || "No indicada"}
+                </div>
+
                 <div
                   style={{
                     fontSize: 12,
@@ -885,6 +915,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                     fontWeight: s.fileKey ? 400 : 600,
+                    marginTop: 2,
                   }}
                 >
                   {s.fileKey ? `${s.fileName} · ${fmtKB(s.fileSize)}` : "⚠ Sin archivo de programa"} · registrado {fmtHora(s.uploadedAt)}
@@ -968,7 +999,7 @@ function ActaSection({ wk, subs, empresas, faltantes, notify }) {
       const contexto = subs
         .map(
           (s) =>
-            `- ${s.empresa} | Expositor: ${s.expositor} | Programó: ${(s.dias || []).map((d) => `${DIAS[d]} ${fmtDia(wk.dates[d])}`).join(", ")} | Presentó: ${(s.presento || []).length ? (s.presento || []).map((d) => DIAS[d]).join(", ") : "ninguno aún"} | Archivo: ${s.fileName || "no subió programa"}`
+            `- ${s.empresa} | Central: ${s.centralPresentada || "no indicada"} | Expositor: ${s.expositor} | Programó: ${(s.dias || []).map((d) => `${DIAS[d]} ${fmtDia(wk.dates[d])}`).join(", ")} | Presentó: ${(s.presento || []).length ? (s.presento || []).map((d) => DIAS[d]).join(", ") : "ninguno aún"} | Archivo: ${s.fileName || "no subió programa"}`
         )
         .join("\n");
 
@@ -985,7 +1016,7 @@ ${transcript}
 ESTRUCTURA REQUERIDA del acta:
 # ACTA DE REUNIÓN SEMANAL DE PROVEEDORES
 1. **Datos generales**: fecha de la reunión, semana operativa (rango de fechas), área (Mantenimiento Eléctrico).
-2. **Asistentes**: tabla o lista de empresa y expositor (cruza los registros de la plataforma con lo mencionado en la transcripción).
+2. **Asistentes**: tabla o lista de empresa, central declarada y expositor (cruza los registros de la plataforma con lo mencionado en la transcripción).
 3. **Desarrollo**: resumen por empresa de lo expuesto (actividades de la semana, avances, restricciones), basado estrictamente en la transcripción.
 4. **Acuerdos y compromisos**: lista numerada con responsable y fecha límite cuando se mencione.
 5. **Pendientes y observaciones**: incluye empresas que no subieron programa o no expusieron.
