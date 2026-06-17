@@ -1345,7 +1345,7 @@ function ResumenObservacionesProveedor({ sub, filtroCentral }) {
 
               {observaciones.length > 8 && (
                 <div style={{ fontSize: 12, color: C.slate, marginTop: 8 }}>
-                  Mostrando las primeras 8 observaciones de {observaciones.length}. Este resumen evita abrumar al proveedor; el detalle completo queda guardado en Supabase.
+                  Mostrando las primeras 8 observaciones de {observaciones.length}.
                 </div>
               )}
             </>
