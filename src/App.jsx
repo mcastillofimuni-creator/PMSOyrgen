@@ -505,7 +505,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
         if (uploadError) throw uploadError;
       }
 
-      const { error: insertError } = await supabase
+      const { data: nuevoRegistro, error: insertError } = await supabase
         .from("pms_archivos")
         .insert({
           semana: wk.id,
@@ -517,15 +517,37 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
           archivo_nombre: archivoNombre,
           archivo_path: archivoPath,
           file_size: archivoSize,
-          estado_validacion: "PENDIENTE",
+          estado_validacion: file ? "VALIDANDO..." : "SIN ARCHIVO",
           errores: 0,
           advertencias: 0,
           actividades: 0,
           observaciones: 0,
           centrales_detectadas: [],
-        });
+        })
+        .select("id")
+        .single();
 
       if (insertError) throw insertError;
+
+      if (file && nuevoRegistro?.id) {
+        try {
+          notify("Archivo subido. Ejecutando validación automática...");
+          await validarPmsEnApi(nuevoRegistro.id);
+        } catch (apiError) {
+          console.error("Error validando PMS en API:", apiError);
+
+          await supabase
+            .from("pms_archivos")
+            .update({
+              estado_validacion: "ERROR API - VALIDACIÓN NO EJECUTADA",
+              errores: 1,
+              advertencias: 0,
+            })
+            .eq("id", nuevoRegistro.id);
+
+          notify("El archivo se subió, pero no se pudo validar automáticamente. Revisa Render/API.", "err");
+        }
+      }
 
       setEmpresa("");
       setOtra("");
