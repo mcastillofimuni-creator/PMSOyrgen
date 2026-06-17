@@ -966,7 +966,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
 
       <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 14, marginBottom: 26 }}>
         <div style={{ fontSize: 13, color: C.slate, marginBottom: 10 }}>
-          Mostrando control para: <strong>{centralActualLabel}</strong>
+           control para: <strong>{centralActualLabel}</strong>
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1345,7 +1345,7 @@ function ResumenObservacionesProveedor({ sub, filtroCentral }) {
 
               {observaciones.length > 8 && (
                 <div style={{ fontSize: 12, color: C.slate, marginTop: 8 }}>
-                  Mostrando las primeras 8 observaciones de {observaciones.length}. Este resumen evita abrumar al proveedor; el detalle completo queda guardado en Supabase.
+                  Mostrando las primeras 8 observaciones de {observaciones.length}.
                 </div>
               )}
             </>
