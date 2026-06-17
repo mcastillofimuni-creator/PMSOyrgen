@@ -1106,12 +1106,23 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
 
               <div style={{ display: "flex", gap: 8 }}>
                 {s.fileKey && (
-                  <button
-                    onClick={() => onRevalidar(s)}
-                    style={{ background: C.green, color: C.white, border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 13, fontWeight: 600 }}
-                  >
-                    Revalidar
-                  </button>
+                 <button
+  onClick={() => revalidarArchivo(s)}
+  disabled={revalidandoId === s.id}
+  title="Vuelve a ejecutar la validación sobre el archivo Excel ya subido"
+  style={{
+    background: C.green,
+    color: C.white,
+    border: "none",
+    borderRadius: 8,
+    padding: "10px 16px",
+    fontWeight: 700,
+    cursor: revalidandoId === s.id ? "wait" : "pointer",
+    whiteSpace: "nowrap",
+  }}
+>
+  {revalidandoId === s.id ? "Revalidando..." : "Revalidar archivo actual"}
+</button>
                 )}
 
                 {s.fileKey && (
