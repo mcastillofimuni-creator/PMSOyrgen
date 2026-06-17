@@ -360,104 +360,6 @@ export default function App() {
         )
       );
 
-      const reemplazarArchivo = async (sub, nuevoFile) => {
-  if (!sub?.id) return notify("No se encontró el ID del registro.", "err");
-  if (!nuevoFile) return;
-
-  if (nuevoFile.size > MAX_FILE) {
-    notify(`El archivo supera ${fmtKB(MAX_FILE)}. Reduce su tamaño.`, "err");
-    return;
-  }
-
-  const nombre = nuevoFile.name || "";
-  const extensionOk = /\.(xlsx|xls|xlsm|csv)$/i.test(nombre);
-
-  if (!extensionOk) {
-    notify("Solo se permiten archivos Excel o CSV.", "err");
-    return;
-  }
-
-  const confirmar = window.confirm(
-    "Se reemplazará el Excel actual y se ejecutará nuevamente la validación. ¿Continuar?"
-  );
-
-  if (!confirmar) return;
-
-  try {
-    notify("Subiendo nueva versión del archivo...");
-
-    const idArchivo = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const empresaLimpia = limpiarEmpresaPath(sub.proveedor || "proveedor");
-    const nombreLimpio = limpiarNombreArchivo(nuevoFile.name);
-    const semana = sub.semana || wk.id;
-
-    const nuevoPath = `semana-${semana}/${empresaLimpia}/${idArchivo}_${nombreLimpio}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("pms-archivos")
-      .upload(nuevoPath, nuevoFile, {
-        cacheControl: "3600",
-        upsert: true,
-      });
-
-    if (uploadError) throw uploadError;
-
-    const { error: updateError } = await supabase
-      .from("pms_archivos")
-      .update({
-        archivo_nombre: nuevoFile.name,
-        archivo_path: nuevoPath,
-        file_size: nuevoFile.size,
-        estado_validacion: "VALIDANDO...",
-        errores: 0,
-        advertencias: 0,
-        actividades: 0,
-        observaciones: 0,
-        centrales_detectadas: [],
-      })
-      .eq("id", sub.id);
-
-    if (updateError) throw updateError;
-
-    setSubs((prev) =>
-      prev.map((x) =>
-        x.id === sub.id
-          ? {
-              ...x,
-              fileName: nuevoFile.name,
-              fileKey: nuevoPath,
-              fileSize: nuevoFile.size,
-              estadoValidacion: "VALIDANDO...",
-              errores: 0,
-              advertencias: 0,
-              actividades: 0,
-              observaciones: 0,
-            }
-          : x
-      )
-    );
-
-    notify("Archivo reemplazado. Ejecutando parser PMS...");
-
-    await validarPmsEnApi(sub.id);
-
-    notify("Nueva versión validada correctamente.");
-    await reload();
-  } catch (err) {
-    console.error("Error reemplazando archivo:", err);
-
-    await supabase
-      .from("pms_archivos")
-      .update({
-        estado_validacion: "ERROR AL REEMPLAZAR / VALIDAR",
-        errores: 1,
-      })
-      .eq("id", sub.id);
-
-    notify("No se pudo reemplazar o validar el archivo.", "err");
-    await reload();
-  }
-};
       await validarPmsEnApi(sub.id);
       await reload();
 
@@ -586,7 +488,6 @@ export default function App() {
             onDelete={deleteSub}
             onDownload={downloadFile}
             onRevalidar={revalidarSub}
-            onReemplazar={reemplazarArchivo}
             onSaveEmpresas={saveEmpresas}
             notify={notify}
           />
@@ -898,7 +799,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
 }
 
 // ─── Panel del supervisor ───
-function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete, onDownload, onRevalidar,onReemplazar ,onSaveEmpresas, notify }) {
+function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete, onDownload, onRevalidar, onSaveEmpresas, notify }) {
   const [editEmp, setEditEmp] = useState(false);
   const [nueva, setNueva] = useState("");
   const [filtroCentral, setFiltroCentral] = useState("SANTA ROSA");
@@ -1222,75 +1123,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
                     Revalidar archivo actual
                     </button>
                 )}
-                {s.fileKey && (
-  <button
-    onClick={() => onRevalidar(s)}
-    title="Vuelve a ejecutar la validación sobre el archivo Excel ya subido"
-    style={{
-      background: C.green,
-      color: C.white,
-      border: "none",
-      borderRadius: 6,
-      padding: "8px 12px",
-      fontSize: 13,
-      fontWeight: 600,
-      whiteSpace: "nowrap",
-    }}
-  >
-    Revalidar archivo actual
-  </button>
-)}
 
-{s.fileKey && (
-  <label
-    title="Sube una versión corregida del Excel sin eliminar el registro"
-    style={{
-      background: C.orange,
-      color: C.white,
-      border: "none",
-      borderRadius: 6,
-      padding: "8px 12px",
-      fontSize: 13,
-      fontWeight: 600,
-      whiteSpace: "nowrap",
-      cursor: "pointer",
-      display: "inline-flex",
-      alignItems: "center",
-    }}
-  >
-    Reemplazar archivo
-    <input
-      type="file"
-      accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
-      style={{ display: "none" }}
-      onChange={async (e) => {
-        const nuevoFile = e.target.files?.[0];
-        e.target.value = "";
-
-        if (!nuevoFile) return;
-
-        await onReemplazar(s, nuevoFile);
-      }}
-    />
-  </label>
-)}
-
-{s.fileKey && (
-  <button
-    onClick={() => onDownload(s)}
-    style={{
-      background: C.navy,
-      color: C.white,
-      border: "none",
-      borderRadius: 6,
-      padding: "8px 12px",
-      fontSize: 13,
-      fontWeight: 600,
-    }}
-  >
-    Descargar
-  </button>
-)}
                 {s.fileKey && (
                   <button
                     onClick={() => onDownload(s)}
