@@ -22,7 +22,10 @@ const C = {
   amberBg: "#FCF3DC",
 };
 
-const CENTRALES = ["C. T. Santa Rosa", "C.C. Ventanilla"];
+const CENTRALES = [
+  { label: "C. T. Santa Rosa", value: "SANTA ROSA" },
+  { label: "C.C. Ventanilla", value: "VENTANILLA" },
+];
 
 const FONT = "'Barlow', system-ui, sans-serif";
 const FONT_COND = "'Barlow Condensed', 'Barlow', system-ui, sans-serif";
@@ -102,6 +105,24 @@ function limpiarEmpresaPath(nombre) {
     .replace(/[^A-Z0-9_-]/g, "_");
 }
 
+function normalizarCentral(valor = "") {
+  const v = String(valor || "").toUpperCase();
+
+  if (v.includes("SANTA ROSA")) return "SANTA ROSA";
+  if (v.includes("VENTANILLA")) return "VENTANILLA";
+
+  return "";
+}
+
+function etiquetaCentral(valor = "") {
+  const v = normalizarCentral(valor);
+
+  if (v === "SANTA ROSA") return "C. T. Santa Rosa";
+  if (v === "VENTANILLA") return "C.C. Ventanilla";
+
+  return "Central no indicada";
+}
+
 // ─── PMS desde Supabase ───
 async function listSubs(weekId) {
   const { data, error } = await supabase
@@ -120,6 +141,8 @@ async function listSubs(weekId) {
     empresa: row.proveedor || "",
     expositor: row.expositor || "",
     centralPresentada: row.central_presentada || "",
+    centralNorm: normalizarCentral(row.central_presentada || ""),
+    centralesDetectadas: Array.isArray(row.centrales_detectadas) ? row.centrales_detectadas : [],
     dias: Array.isArray(row.dias) ? row.dias : [],
     presento: Array.isArray(row.presento) ? row.presento : [],
     fileName: row.archivo_nombre || null,
@@ -129,6 +152,8 @@ async function listSubs(weekId) {
     estadoValidacion: row.estado_validacion || "PENDIENTE",
     errores: row.errores || 0,
     advertencias: row.advertencias || 0,
+    actividades: row.actividades || 0,
+    observaciones: row.observaciones || 0,
   }));
 }
 
@@ -472,6 +497,9 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
           estado_validacion: "PENDIENTE",
           errores: 0,
           advertencias: 0,
+          actividades: 0,
+          observaciones: 0,
+          centrales_detectadas: [],
         });
 
       if (insertError) throw insertError;
@@ -560,8 +588,8 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
         <select value={central} onChange={(e) => setCentral(e.target.value)} style={field}>
           <option value="">Seleccionar central…</option>
           {CENTRALES.map((c) => (
-            <option key={c} value={c}>
-              {c}
+            <option key={c.value} value={c.label}>
+              {c.label}
             </option>
           ))}
         </select>
@@ -663,23 +691,50 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
 function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete, onDownload, onSaveEmpresas, notify }) {
   const [editEmp, setEditEmp] = useState(false);
   const [nueva, setNueva] = useState("");
+  const [filtroCentral, setFiltroCentral] = useState("SANTA ROSA");
 
-  const registraron = new Set(subs.map((s) => s.empresa.trim().toUpperCase()));
-  const conArchivo = new Set(subs.filter((s) => s.fileKey).map((s) => s.empresa.trim().toUpperCase()));
+  const visibleSubs = subs.filter((s) => normalizarCentral(s.centralPresentada) === filtroCentral);
+
+  const registraron = new Set(visibleSubs.map((s) => s.empresa.trim().toUpperCase()));
+  const conArchivo = new Set(visibleSubs.filter((s) => s.fileKey).map((s) => s.empresa.trim().toUpperCase()));
 
   const faltantes = empresas.filter((e) => !registraron.has(e.trim().toUpperCase()));
   const sinArchivo = empresas.filter((e) => !conArchivo.has(e.trim().toUpperCase()));
 
-  const totalProg = subs.reduce((n, s) => n + (s.dias || []).length, 0);
-  const totalCumplido = subs.reduce((n, s) => n + (s.dias || []).filter((d) => (s.presento || []).includes(d)).length, 0);
+  const totalProg = visibleSubs.reduce((n, s) => n + (s.dias || []).length, 0);
+  const totalCumplido = visibleSubs.reduce((n, s) => n + (s.dias || []).filter((d) => (s.presento || []).includes(d)).length, 0);
+
+  const centralActualLabel = CENTRALES.find((c) => c.value === filtroCentral)?.label || "C. T. Santa Rosa";
 
   if (loading) return <div style={{ textAlign: "center", padding: 60, color: C.slate }}>Cargando registros…</div>;
 
   return (
     <div>
+      <h3 style={sectionTitle}>Filtro de central</h3>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+        {CENTRALES.map((c) => (
+          <button
+            key={c.value}
+            onClick={() => setFiltroCentral(c.value)}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 999,
+              border: filtroCentral === c.value ? `1.5px solid ${C.orange}` : `1.5px solid ${C.line}`,
+              background: filtroCentral === c.value ? C.orangeBg : C.white,
+              color: filtroCentral === c.value ? C.orange : C.slate,
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
         {[
-          ["Programas recibidos", subs.length, C.navy],
+          [`Programas recibidos · ${centralActualLabel}`, visibleSubs.length, C.navy],
           ["Días programados cumplidos", `${totalCumplido} / ${totalProg}`, C.green],
           ["Empresas sin programa subido", sinArchivo.length, sinArchivo.length ? C.red : C.green],
         ].map(([t, v, col]) => (
@@ -692,8 +747,8 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
 
       <h3 style={sectionTitle}>Matriz semanal · programado vs presentado</h3>
 
-      {subs.length === 0 ? (
-        <Vacio texto="Aún no hay programas registrados esta semana. Comparte el enlace con los proveedores." />
+      {visibleSubs.length === 0 ? (
+        <Vacio texto={`Aún no hay programas registrados para ${centralActualLabel}.`} />
       ) : (
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflowX: "auto", marginBottom: 8 }}>
           <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 720, fontSize: 13 }}>
@@ -710,7 +765,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
             </thead>
 
             <tbody>
-              {subs.map((s, ri) => (
+              {visibleSubs.map((s, ri) => (
                 <tr key={s.id} style={{ borderTop: `1px solid ${C.line}` }}>
                   <td
                     style={{
@@ -724,7 +779,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
                     <div style={{ fontWeight: 700 }}>{s.empresa}</div>
                     <div style={{ fontSize: 12, color: C.slate }}>{s.expositor}</div>
                     <div style={{ fontSize: 11, color: C.orange, marginTop: 2, fontWeight: 700 }}>
-                      {s.centralPresentada || "Central no indicada"}
+                      {etiquetaCentral(s.centralPresentada)}
                     </div>
                     {s.estadoValidacion && (
                       <div style={{ fontSize: 11, color: C.slate, marginTop: 2 }}>
@@ -787,7 +842,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
         </div>
       )}
 
-      {subs.length > 0 && (
+      {visibleSubs.length > 0 && (
         <p style={{ fontSize: 13, color: C.slate, margin: "0 0 26px" }}>
           <span style={{ color: C.orange, fontWeight: 700 }}>●</span> Programado, pendiente &nbsp;·&nbsp;
           <span style={{ color: C.green, fontWeight: 700 }}>✓</span> Programado y presentó &nbsp;·&nbsp;
@@ -799,6 +854,10 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
       <h3 style={sectionTitle}>Control de entrega del programa</h3>
 
       <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 14, marginBottom: 26 }}>
+        <div style={{ fontSize: 13, color: C.slate, marginBottom: 10 }}>
+          Mostrando control para: <strong>{centralActualLabel}</strong>
+        </div>
+
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {empresas.map((e) => {
             const key = e.trim().toUpperCase();
@@ -882,11 +941,11 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
 
       <h3 style={sectionTitle}>Programas recibidos</h3>
 
-      {subs.length === 0 ? (
-        <Vacio texto="Los archivos subidos por los proveedores aparecerán aquí." />
+      {visibleSubs.length === 0 ? (
+        <Vacio texto={`Los archivos subidos para ${centralActualLabel} aparecerán aquí.`} />
       ) : (
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden", marginBottom: 26 }}>
-          {subs.map((s, i) => (
+          {visibleSubs.map((s, i) => (
             <div
               key={s.id}
               style={{
@@ -904,7 +963,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
                 </div>
 
                 <div style={{ fontSize: 12, color: C.orange, marginTop: 2, fontWeight: 700 }}>
-                  Central declarada: {s.centralPresentada || "No indicada"}
+                  Central declarada: {etiquetaCentral(s.centralPresentada)}
                 </div>
 
                 <div
@@ -928,6 +987,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
                 <div style={{ fontSize: 12, color: C.slate, marginTop: 2 }}>
                   Validación: {s.estadoValidacion || "PENDIENTE"}
                   {(s.errores || s.advertencias) ? ` · Errores: ${s.errores || 0} · Advertencias: ${s.advertencias || 0}` : ""}
+                  {(s.actividades || s.observaciones) ? ` · Actividades: ${s.actividades || 0} · Observaciones: ${s.observaciones || 0}` : ""}
                 </div>
               </div>
 
@@ -953,7 +1013,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
         </div>
       )}
 
-      <ActaSection wk={wk} subs={subs} empresas={empresas} faltantes={faltantes} notify={notify} />
+      <ActaSection wk={wk} subs={visibleSubs} empresas={empresas} faltantes={faltantes} notify={notify} />
     </div>
   );
 }
@@ -999,7 +1059,7 @@ function ActaSection({ wk, subs, empresas, faltantes, notify }) {
       const contexto = subs
         .map(
           (s) =>
-            `- ${s.empresa} | Central: ${s.centralPresentada || "no indicada"} | Expositor: ${s.expositor} | Programó: ${(s.dias || []).map((d) => `${DIAS[d]} ${fmtDia(wk.dates[d])}`).join(", ")} | Presentó: ${(s.presento || []).length ? (s.presento || []).map((d) => DIAS[d]).join(", ") : "ninguno aún"} | Archivo: ${s.fileName || "no subió programa"}`
+            `- ${s.empresa} | Central: ${etiquetaCentral(s.centralPresentada)} | Expositor: ${s.expositor} | Programó: ${(s.dias || []).map((d) => `${DIAS[d]} ${fmtDia(wk.dates[d])}`).join(", ")} | Presentó: ${(s.presento || []).length ? (s.presento || []).map((d) => DIAS[d]).join(", ") : "ninguno aún"} | Archivo: ${s.fileName || "no subió programa"}`
         )
         .join("\n");
 
@@ -1090,7 +1150,7 @@ Reglas: no inventes información que no esté en la transcripción ni en los dat
 
       <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
         <p style={{ fontSize: 14, color: C.slate, margin: "0 0 10px" }}>
-          Pega la transcripción resumida (Copilot) o sube el archivo .txt. El acta se genera cruzando la transcripción con los registros de la matriz semanal.
+          Pega la transcripción resumida (Copilot) o sube el archivo .txt. El acta se genera cruzando la transcripción con los registros de la matriz semanal filtrada.
         </p>
 
         <textarea
