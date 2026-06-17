@@ -1106,14 +1106,12 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
 
               <div style={{ display: "flex", gap: 8 }}>
                 {s.fileKey && (
-                <button
-                    onClick={() => revalidarArchivo(s)}
-                    disabled={revalidandoId === s.id}
-                    style={{background: C.green, color: C.white, border: "none", borderRadius: 8, padding: "10px 16px", fontWeight: 700, cursor: revalidandoId === s.id ? "wait" : "pointer",
-  }}
->
-  {revalidandoId === s.id ? "Revalidando..." : "Revalidar"}
-</button> 
+                  <button
+                    onClick={() => onRevalidar(s)}
+                    style={{ background: C.green, color: C.white, border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 13, fontWeight: 600 }}
+                  >
+                    Revalidar
+                  </button>
                 )}
 
                 {s.fileKey && (
@@ -1301,7 +1299,7 @@ function ResumenObservacionesProveedor({ sub, filtroCentral }) {
                   </thead>
 
                   <tbody>
-                    {ordenarObservacionesParaProveedor(observaciones).slice(0, 8).map((o) => (
+                    {observaciones.slice(0, 8).map((o) => (
                       <tr key={o.id} style={{ borderTop: `1px solid ${C.line}` }}>
                         <td style={tdObs}>
                           <span
@@ -1347,7 +1345,7 @@ function ResumenObservacionesProveedor({ sub, filtroCentral }) {
 
               {observaciones.length > 8 && (
                 <div style={{ fontSize: 12, color: C.slate, marginTop: 8 }}>
-                  Mostrando las primeras 8 observaciones de {observaciones.length}.
+                  Mostrando las primeras 8 observaciones de {observaciones.length}. Este resumen evita abrumar al proveedor; el detalle completo queda guardado en Supabase.
                 </div>
               )}
             </>
@@ -1798,33 +1796,7 @@ const thBase = {
   textAlign: "center",
   minWidth: 56,
 };
-function ordenarObservacionesParaProveedor(observaciones) {
-  const prioridadNivel = {
-    ERROR: 1,
-    ADVERTENCIA: 2,
-  };
 
-  return [...observaciones].sort((a, b) => {
-    const prioridadA = prioridadNivel[a.nivel] || 99;
-    const prioridadB = prioridadNivel[b.nivel] || 99;
-
-    if (prioridadA !== prioridadB) {
-      return prioridadA - prioridadB;
-    }
-
-    const filaA = Number(a.fila_excel || 999999);
-    const filaB = Number(b.fila_excel || 999999);
-
-    if (filaA !== filaB) {
-      return filaA - filaB;
-    }
-
-    const obsA = String(a.tipo_observacion || "");
-    const obsB = String(b.tipo_observacion || "");
-
-    return obsA.localeCompare(obsB);
-  });
-}
 function Vacio({ texto }) {
   return (
     <div style={{ background: "#FFFFFF", border: "1px dashed #E3DAD0", borderRadius: 10, padding: "26px 18px", textAlign: "center", fontSize: 14, color: "#5C6670", marginBottom: 26 }}>
