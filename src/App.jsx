@@ -38,10 +38,14 @@ const MAX_FILE = 3.5 * 1024 * 1024;
 const PARSER_API = "https://api-parser-pms.onrender.com";
 
 async function validarPmsEnApi(pmsArchivoId) {
+  console.log("Llamando API parser con ID:", pmsArchivoId);
+
   const response = await fetch(`${PARSER_API}/validar-pms`, {
     method: "POST",
+    mode: "cors",
     headers: {
       "Content-Type": "application/json",
+      Accept: "application/json",
     },
     body: JSON.stringify({
       pms_archivo_id: pmsArchivoId,
@@ -49,6 +53,8 @@ async function validarPmsEnApi(pmsArchivoId) {
   });
 
   const data = await response.json().catch(() => ({}));
+
+  console.log("Respuesta API parser:", response.status, data);
 
   if (!response.ok) {
     throw new Error(data.detail || `Error ${response.status} validando PMS`);
@@ -321,6 +327,61 @@ export default function App() {
     }
   };
 
+  const revalidarSub = async (sub) => {
+    if (!sub?.id) return notify("No se encontró el ID del registro.", "err");
+    if (!sub.fileKey) return notify("Este registro no tiene archivo para validar.", "err");
+
+    try {
+      notify("Ejecutando parser PMS...");
+
+      await supabase
+        .from("pms_archivos")
+        .update({
+          estado_validacion: "VALIDANDO...",
+          errores: 0,
+          advertencias: 0,
+          actividades: 0,
+          observaciones: 0,
+        })
+        .eq("id", sub.id);
+
+      setSubs((prev) =>
+        prev.map((x) =>
+          x.id === sub.id
+            ? {
+                ...x,
+                estadoValidacion: "VALIDANDO...",
+                errores: 0,
+                advertencias: 0,
+                actividades: 0,
+                observaciones: 0,
+              }
+            : x
+        )
+      );
+
+      await validarPmsEnApi(sub.id);
+      await reload();
+
+      notify("PMS validado correctamente.");
+    } catch (err) {
+      console.error("Error revalidando PMS:", err);
+
+      await supabase
+        .from("pms_archivos")
+        .update({
+          estado_validacion: "ERROR API - VALIDACIÓN NO EJECUTADA",
+          errores: 1,
+          advertencias: 0,
+        })
+        .eq("id", sub.id);
+
+      await reload();
+
+      notify("No se pudo ejecutar el parser. Revisa Render/API o CORS.", "err");
+    }
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT, color: C.navy }}>
       <style>{`
@@ -426,6 +487,7 @@ export default function App() {
             onTogglePresento={togglePresento}
             onDelete={deleteSub}
             onDownload={downloadFile}
+            onRevalidar={revalidarSub}
             onSaveEmpresas={saveEmpresas}
             notify={notify}
           />
@@ -531,8 +593,12 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
 
       if (file && nuevoRegistro?.id) {
         try {
+          console.log("Registro creado en Supabase:", nuevoRegistro);
           notify("Archivo subido. Ejecutando validación automática...");
+
           await validarPmsEnApi(nuevoRegistro.id);
+
+          notify("PMS validado correctamente.");
         } catch (apiError) {
           console.error("Error validando PMS en API:", apiError);
 
@@ -545,7 +611,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
             })
             .eq("id", nuevoRegistro.id);
 
-          notify("El archivo se subió, pero no se pudo validar automáticamente. Revisa Render/API.", "err");
+          notify("El archivo se subió, pero no se pudo validar automáticamente. Usa Revalidar o revisa Render/API.", "err");
         }
       }
 
@@ -733,7 +799,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
 }
 
 // ─── Panel del supervisor ───
-function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete, onDownload, onSaveEmpresas, notify }) {
+function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete, onDownload, onRevalidar, onSaveEmpresas, notify }) {
   const [editEmp, setEditEmp] = useState(false);
   const [nueva, setNueva] = useState("");
   const [filtroCentral, setFiltroCentral] = useState("SANTA ROSA");
@@ -1037,6 +1103,15 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
               </div>
 
               <div style={{ display: "flex", gap: 8 }}>
+                {s.fileKey && (
+                  <button
+                    onClick={() => onRevalidar(s)}
+                    style={{ background: C.green, color: C.white, border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 13, fontWeight: 600 }}
+                  >
+                    Revalidar
+                  </button>
+                )}
+
                 {s.fileKey && (
                   <button
                     onClick={() => onDownload(s)}
