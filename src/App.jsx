@@ -35,6 +35,29 @@ const DIAS = ["Sáb", "Dom", "Lun", "Mar", "Mié", "Jue", "Vie"];
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const EMPRESAS_DEFAULT = ["MAGNEX", "UNITELEC", "SEFREL", "DIM", "T&D ELECTRIC", "MAQUIRENTAS"];
 const MAX_FILE = 3.5 * 1024 * 1024;
+const PARSER_API = "https://api-parser-pms.onrender.com";
+
+async function validarPmsEnApi(pmsArchivoId) {
+  const response = await fetch(`${PARSER_API}/validar-pms`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      pms_archivo_id: pmsArchivoId,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || `Error ${response.status} validando PMS`);
+  }
+
+  return data;
+}
+
+
 
 // Storage local solo para configuración de empresas y acta.
 // Los PMS ya se guardan en Supabase.
