@@ -1108,10 +1108,20 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
                 {s.fileKey && (
                   <button
                     onClick={() => onRevalidar(s)}
-                    style={{ background: C.green, color: C.white, border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 13, fontWeight: 600 }}
-                  >
-                    Revalidar
-                  </button>
+                    title="Vuelve a ejecutar la validación sobre el archivo Excel ya subido"
+                    style={{
+                      background: C.green,
+                      color: C.white,
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "8px 12px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                    }}
+                >
+                    Revalidar archivo actual
+                    </button>
                 )}
 
                 {s.fileKey && (
