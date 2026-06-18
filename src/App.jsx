@@ -146,49 +146,6 @@ function etiquetaCentral(valor = "") {
   return "Central no indicada";
 }
 
-function getNumeroPms(fechaSemana) {
-  const base = fechaSemana instanceof Date ? fechaSemana : new Date(`${fechaSemana}T00:00:00`);
-
-  if (Number.isNaN(base.getTime())) return "";
-
-  const date = new Date(Date.UTC(base.getFullYear(), base.getMonth(), base.getDate()));
-  const dayNum = date.getUTCDay() || 7;
-
-  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
-
-  return weekNo;
-}
-
-function BadgePms({ wk, dark = false }) {
-  const numero = getNumeroPms(wk?.id || wk?.start);
-
-  if (!numero) return null;
-
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: dark ? C.orange : C.orangeBg,
-        color: dark ? C.white : C.orange,
-        border: dark ? "none" : `1px solid ${C.orange}`,
-        borderRadius: 999,
-        padding: "3px 9px",
-        fontSize: 12,
-        fontWeight: 800,
-        letterSpacing: 0.4,
-        whiteSpace: "nowrap",
-      }}
-    >
-      PMS {numero}
-    </span>
-  );
-}
-
 // ─── PMS desde Supabase ───
 async function listSubs(weekId) {
   const { data, error } = await supabase
@@ -392,23 +349,11 @@ export default function App() {
               ‹
             </button>
 
-            <div style={{ textAlign: "center", minWidth: 250 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 20, letterSpacing: 0.5 }}>
-                  Semana Sáb–Vie
-                </div>
-                <BadgePms wk={wk} dark />
+            <div style={{ textAlign: "center", minWidth: 210 }}>
+              <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 20, letterSpacing: 0.5 }}>
+                Semana Sáb–Vie
               </div>
-
-              <div style={{ fontSize: 13, color: "#9AA7B2", marginTop: 2 }}>
+              <div style={{ fontSize: 13, color: "#9AA7B2" }}>
                 {fmtRango(wk)}
                 {offset === 0 && <span style={{ color: C.orangeLight, fontWeight: 600 }}> · actual</span>}
               </div>
@@ -643,15 +588,12 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
 
   return (
     <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: 22, maxWidth: 600, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
-        <h2 style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 22, margin: 0, textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Programa semanal
-        </h2>
-        <BadgePms wk={wk} />
-      </div>
+      <h2 style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 22, margin: "0 0 4px", textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Programa semanal
+      </h2>
 
       <p style={{ fontSize: 14, color: C.slate, margin: "0 0 20px" }}>
-        Semana del {fmtRango(wk)} · PMS {getNumeroPms(wk.id)}. La información registrada es visible para todos los participantes.
+        Semana del {fmtRango(wk)}. La información registrada es visible para todos los participantes.
       </p>
 
       <div style={{ marginBottom: 16 }}>
@@ -813,13 +755,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        <h3 style={{ ...sectionTitle, margin: 0 }}>Filtro de central</h3>
-        <BadgePms wk={wk} />
-        <span style={{ fontSize: 13, color: C.slate, fontWeight: 600 }}>
-          {fmtRango(wk)}
-        </span>
-      </div>
+      <h3 style={sectionTitle}>Filtro de central</h3>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
         {CENTRALES.map((c) => (
