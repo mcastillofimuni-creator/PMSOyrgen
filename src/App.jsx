@@ -22,23 +22,6 @@ const C = {
   amberBg: "#FCF3DC",
 };
 
-function getNumeroPms(fechaSemana) {
-  const d = new Date(`${fechaSemana}T00:00:00`);
-
-  // Copia de fecha para cálculo ISO
-  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-
-  // Jueves de esa semana
-  const dayNum = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-
-  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
-
-  return weekNo;
-}
-
 const CENTRALES = [
   { label: "C. T. Santa Rosa", value: "SANTA ROSA" },
   { label: "C.C. Ventanilla", value: "VENTANILLA" },
@@ -55,14 +38,10 @@ const MAX_FILE = 3.5 * 1024 * 1024;
 const PARSER_API = "https://api-parser-pms.onrender.com";
 
 async function validarPmsEnApi(pmsArchivoId) {
-  console.log("Llamando API parser con ID:", pmsArchivoId);
-
   const response = await fetch(`${PARSER_API}/validar-pms`, {
     method: "POST",
-    mode: "cors",
     headers: {
       "Content-Type": "application/json",
-      Accept: "application/json",
     },
     body: JSON.stringify({
       pms_archivo_id: pmsArchivoId,
@@ -70,8 +49,6 @@ async function validarPmsEnApi(pmsArchivoId) {
   });
 
   const data = await response.json().catch(() => ({}));
-
-  console.log("Respuesta API parser:", response.status, data);
 
   if (!response.ok) {
     throw new Error(data.detail || `Error ${response.status} validando PMS`);
@@ -344,163 +321,6 @@ export default function App() {
     }
   };
 
-  const revalidarSub = async (sub) => {
-    if (!sub?.id) return notify("No se encontró el ID del registro.", "err");
-    if (!sub.fileKey) return notify("Este registro no tiene archivo para validar.", "err");
-
-    try {
-      notify("Ejecutando parser PMS...");
-
-      await supabase
-        .from("pms_archivos")
-        .update({
-          estado_validacion: "VALIDANDO...",
-          errores: 0,
-          advertencias: 0,
-          actividades: 0,
-          observaciones: 0,
-        })
-        .eq("id", sub.id);
-
-      setSubs((prev) =>
-        prev.map((x) =>
-          x.id === sub.id
-            ? {
-                ...x,
-                estadoValidacion: "VALIDANDO...",
-                errores: 0,
-                advertencias: 0,
-                actividades: 0,
-                observaciones: 0,
-              }
-            : x
-        )
-      );
-
-      await validarPmsEnApi(sub.id);
-      await reload();
-
-      notify("PMS validado correctamente.");
-    } catch (err) {
-      console.error("Error revalidando PMS:", err);
-
-      await supabase
-        .from("pms_archivos")
-        .update({
-          estado_validacion: "ERROR API - VALIDACIÓN NO EJECUTADA",
-          errores: 1,
-          advertencias: 0,
-        })
-        .eq("id", sub.id);
-
-      await reload();
-
-      notify("No se pudo ejecutar el parser. Revisa Render/API o CORS.", "err");
-    }
-  };
-
-  const reemplazarArchivo = async (sub, nuevoFile) => {
-    if (!sub?.id) return notify("No se encontró el ID del registro.", "err");
-    if (!nuevoFile) return;
-
-    if (nuevoFile.size > MAX_FILE) {
-      notify(`El archivo supera ${fmtKB(MAX_FILE)}. Reduce su tamaño.`, "err");
-      return;
-    }
-
-    const nombre = nuevoFile.name || "";
-    const extensionOk = /\.(xlsx|xls|xlsm|csv)$/i.test(nombre);
-
-    if (!extensionOk) {
-      notify("Solo se permiten archivos Excel o CSV.", "err");
-      return;
-    }
-
-    const confirmar = window.confirm(
-      "Se reemplazará el Excel actual y se ejecutará nuevamente la validación. ¿Continuar?"
-    );
-
-    if (!confirmar) return;
-
-    try {
-      notify("Subiendo nueva versión del archivo...");
-
-      const idArchivo = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      const empresaLimpia = limpiarEmpresaPath(sub.empresa || "proveedor");
-      const nombreLimpio = limpiarNombreArchivo(nuevoFile.name);
-      const semana = wk.id;
-
-      const nuevoPath = `semana-${semana}/${empresaLimpia}/${idArchivo}_${nombreLimpio}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("pms-archivos")
-        .upload(nuevoPath, nuevoFile, {
-          cacheControl: "3600",
-          upsert: true,
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { error: updateError } = await supabase
-        .from("pms_archivos")
-        .update({
-          archivo_nombre: nuevoFile.name,
-          archivo_path: nuevoPath,
-          file_size: nuevoFile.size,
-          estado_validacion: "VALIDANDO...",
-          errores: 0,
-          advertencias: 0,
-          actividades: 0,
-          observaciones: 0,
-          centrales_detectadas: [],
-        })
-        .eq("id", sub.id);
-
-      if (updateError) throw updateError;
-
-      setSubs((prev) =>
-        prev.map((x) =>
-          x.id === sub.id
-            ? {
-                ...x,
-                fileName: nuevoFile.name,
-                fileKey: nuevoPath,
-                fileSize: nuevoFile.size,
-                estadoValidacion: "VALIDANDO...",
-                errores: 0,
-                advertencias: 0,
-                actividades: 0,
-                observaciones: 0,
-                centralesDetectadas: [],
-              }
-            : x
-        )
-      );
-
-      notify("Archivo reemplazado. Ejecutando parser PMS...");
-
-      await validarPmsEnApi(sub.id);
-      await reload();
-
-      notify("Nueva versión validada correctamente.");
-    } catch (err) {
-      console.error("Error reemplazando archivo:", err);
-
-      await supabase
-        .from("pms_archivos")
-        .update({
-          estado_validacion: "ERROR AL REEMPLAZAR / VALIDAR",
-          errores: 1,
-          advertencias: 0,
-        })
-        .eq("id", sub.id);
-
-      await reload();
-
-      notify("No se pudo reemplazar o validar el archivo.", "err");
-    }
-  };
-
   return (
     <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT, color: C.navy }}>
       <style>{`
@@ -606,8 +426,6 @@ export default function App() {
             onTogglePresento={togglePresento}
             onDelete={deleteSub}
             onDownload={downloadFile}
-            onRevalidar={revalidarSub}
-            onReemplazar={reemplazarArchivo}
             onSaveEmpresas={saveEmpresas}
             notify={notify}
           />
@@ -713,12 +531,8 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
 
       if (file && nuevoRegistro?.id) {
         try {
-          console.log("Registro creado en Supabase:", nuevoRegistro);
           notify("Archivo subido. Ejecutando validación automática...");
-
           await validarPmsEnApi(nuevoRegistro.id);
-
-          notify("PMS validado correctamente.");
         } catch (apiError) {
           console.error("Error validando PMS en API:", apiError);
 
@@ -731,7 +545,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
             })
             .eq("id", nuevoRegistro.id);
 
-          notify("El archivo se subió, pero no se pudo validar automáticamente. Usa Revalidar o revisa Render/API.", "err");
+          notify("El archivo se subió, pero no se pudo validar automáticamente. Revisa Render/API.", "err");
         }
       }
 
@@ -919,7 +733,7 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
 }
 
 // ─── Panel del supervisor ───
-function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete, onDownload, onRevalidar, onReemplazar, onSaveEmpresas, notify }) {
+function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete, onDownload, onSaveEmpresas, notify }) {
   const [editEmp, setEditEmp] = useState(false);
   const [nueva, setNueva] = useState("");
   const [filtroCentral, setFiltroCentral] = useState("SANTA ROSA");
@@ -1086,7 +900,7 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
 
       <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 14, marginBottom: 26 }}>
         <div style={{ fontSize: 13, color: C.slate, marginBottom: 10 }}>
-           control para: <strong>{centralActualLabel}</strong>
+          Mostrando control para: <strong>{centralActualLabel}</strong>
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1216,68 +1030,13 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
                 </div>
 
                 <div style={{ fontSize: 12, color: C.slate, marginTop: 2 }}>
-                  <strong>Validación:</strong> {s.estadoValidacion || "PENDIENTE"}
+                  Validación: {s.estadoValidacion || "PENDIENTE"}
                   {(s.errores || s.advertencias) ? ` · Errores: ${s.errores || 0} · Advertencias: ${s.advertencias || 0}` : ""}
                   {(s.actividades || s.observaciones) ? ` · Actividades: ${s.actividades || 0} · Observaciones: ${s.observaciones || 0}` : ""}
                 </div>
-
-                <ResumenObservacionesProveedor sub={s} filtroCentral={filtroCentral} />
               </div>
 
               <div style={{ display: "flex", gap: 8 }}>
-                {s.fileKey && (
-                  <button
-                    onClick={() => onRevalidar(s)}
-                    title="Vuelve a ejecutar la validación sobre el archivo Excel ya subido"
-                    style={{
-                      background: C.green,
-                      color: C.white,
-                      border: "none",
-                      borderRadius: 6,
-                      padding: "8px 12px",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    Revalidar archivo actual
-                  </button>
-                )}
-
-                {s.fileKey && (
-                  <label
-                    title="Sube una versión corregida del Excel sin eliminar el registro"
-                    style={{
-                      background: C.orange,
-                      color: C.white,
-                      border: "none",
-                      borderRadius: 6,
-                      padding: "8px 12px",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                    }}
-                  >
-                    Reemplazar archivo
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
-                      style={{ display: "none" }}
-                      onChange={async (e) => {
-                        const nuevoFile = e.target.files?.[0];
-                        e.target.value = "";
-
-                        if (!nuevoFile) return;
-
-                        await onReemplazar(s, nuevoFile);
-                      }}
-                    />
-                  </label>
-                )}
-
                 {s.fileKey && (
                   <button
                     onClick={() => onDownload(s)}
@@ -1303,355 +1062,6 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
     </div>
   );
 }
-
-
-// ─── Resumen amigable de observaciones para proveedor ───
-function ResumenObservacionesProveedor({ sub, filtroCentral }) {
-  const [abierto, setAbierto] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [observaciones, setObservaciones] = useState([]);
-  const [error, setError] = useState("");
-
-  const cargarObservaciones = async () => {
-    if (!sub?.id) return;
-
-    setLoading(true);
-    setError("");
-
-    try {
-      let query = supabase
-        .from("pms_observaciones")
-        .select(
-          "id,nivel,campo,tipo_observacion,central,unidad,actividad,inspector_responsable,fila_excel,valor_detectado,sugerencia"
-        )
-        .eq("pms_archivo_id", sub.id)
-        .order("nivel", { ascending: true })
-        .order("fila_excel", { ascending: true });
-
-      if (filtroCentral && filtroCentral !== "TODAS") {
-        query = query.eq("central", filtroCentral);
-      }
-
-      const { data, error: supaError } = await query;
-
-      if (supaError) throw supaError;
-
-      setObservaciones(data || []);
-    } catch (err) {
-      console.error("Error leyendo observaciones:", err);
-      setError("No se pudieron cargar las observaciones.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const toggle = async () => {
-    const nuevoEstado = !abierto;
-    setAbierto(nuevoEstado);
-
-    if (nuevoEstado && observaciones.length === 0) {
-      await cargarObservaciones();
-    }
-  };
-
-  const resumen = generarResumenObservaciones(observaciones);
-
-  return (
-    <div style={{ marginTop: 8 }}>
-      <button
-        onClick={toggle}
-        style={{
-          background: abierto ? C.navy : C.white,
-          color: abierto ? C.white : C.navy,
-          border: `1px solid ${abierto ? C.navy : C.line}`,
-          borderRadius: 6,
-          padding: "6px 10px",
-          fontSize: 12,
-          fontWeight: 700,
-        }}
-      >
-        {abierto ? "Ocultar observaciones" : "Ver observaciones"}
-      </button>
-
-      {abierto && (
-        <div
-          style={{
-            marginTop: 10,
-            padding: 12,
-            border: `1px solid ${C.line}`,
-            borderRadius: 8,
-            background: "#FBF8F4",
-          }}
-        >
-          {loading ? (
-            <div style={{ fontSize: 13, color: C.slate }}>Cargando observaciones…</div>
-          ) : error ? (
-            <div style={{ fontSize: 13, color: C.red }}>{error}</div>
-          ) : observaciones.length === 0 ? (
-            <div style={{ fontSize: 13, color: C.green, fontWeight: 600 }}>
-              No se encontraron observaciones para esta central.
-            </div>
-          ) : (
-            <>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                  gap: 8,
-                  marginBottom: 12,
-                }}
-              >
-                <MiniCardObs
-                  titulo="Estado"
-                  valor={resumen.estado}
-                  color={resumen.errores > 0 ? C.red : resumen.advertencias > 0 ? C.amber : C.green}
-                />
-
-                <MiniCardObs
-                  titulo="Errores"
-                  valor={resumen.errores}
-                  color={resumen.errores > 0 ? C.red : C.green}
-                />
-
-                <MiniCardObs
-                  titulo="Advertencias"
-                  valor={resumen.advertencias}
-                  color={resumen.advertencias > 0 ? C.amber : C.green}
-                />
-
-                <MiniCardObs
-                  titulo="Filas observadas"
-                  valor={resumen.filasObservadas}
-                  color={C.navy}
-                />
-              </div>
-
-              <div style={{ fontSize: 13, color: C.navy, marginBottom: 8 }}>
-                <strong>Resumen:</strong>{" "}
-                {resumen.principales.length > 0
-                  ? resumen.principales.map((x) => `${x.nombre}: ${x.cantidad}`).join(" · ")
-                  : "Sin observaciones agrupadas."}
-              </div>
-
-              {resumen.otsObservadas.length > 0 && (
-                <div style={{ fontSize: 13, color: C.navy, marginBottom: 10 }}>
-                  <strong>OTs observadas:</strong>{" "}
-                  {resumen.otsObservadas.slice(0, 8).join(", ")}
-                  {resumen.otsObservadas.length > 8 ? ` y ${resumen.otsObservadas.length - 8} más` : ""}
-                </div>
-              )}
-
-              <div style={{ overflowX: "auto" }}>
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    fontSize: 12,
-                    background: C.white,
-                    border: `1px solid ${C.line}`,
-                  }}
-                >
-                  <thead>
-                    <tr style={{ background: C.navy, color: C.white }}>
-                      <th style={thObs}>Nivel</th>
-                      <th style={thObs}>Fila</th>
-                      <th style={thObs}>Observación</th>
-                      <th style={thObs}>Actividad</th>
-                      <th style={thObs}>Valor detectado</th>
-                      <th style={thObs}>Sugerencia</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {ordenarObservacionesParaProveedor(observaciones).slice(0, 8).map((o) => (
-                      <tr key={o.id} style={{ borderTop: `1px solid ${C.line}` }}>
-                        <td style={tdObs}>
-                          <span
-                            style={{
-                              padding: "3px 7px",
-                              borderRadius: 999,
-                              fontWeight: 700,
-                              color: o.nivel === "ERROR" ? C.red : C.amber,
-                              background: o.nivel === "ERROR" ? C.redBg : C.amberBg,
-                              border: `1px solid ${o.nivel === "ERROR" ? C.red : C.amber}`,
-                            }}
-                          >
-                            {o.nivel}
-                          </span>
-                        </td>
-
-                        <td style={tdObs}>{o.fila_excel || "—"}</td>
-
-                        <td style={tdObs}>
-                          <strong>{o.tipo_observacion || "Observación"}</strong>
-                          <div style={{ color: C.slate, marginTop: 2 }}>
-                            Campo: {traducirCampo(o.campo)}
-                          </div>
-                        </td>
-
-                        <td style={tdObs}>
-                          {o.actividad || "—"}
-                          {o.unidad ? (
-                            <div style={{ color: C.slate, marginTop: 2 }}>
-                              Unidad: {o.unidad}
-                            </div>
-                          ) : null}
-                        </td>
-
-                        <td style={tdObs}>{o.valor_detectado || "—"}</td>
-
-                        <td style={tdObs}>{o.sugerencia || "Revisar información."}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {observaciones.length > 8 && (
-                <div style={{ fontSize: 12, color: C.slate, marginTop: 8 }}>
-                  Mostrando las primeras 8 observaciones de {observaciones.length}.
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MiniCardObs({ titulo, valor, color }) {
-  return (
-    <div
-      style={{
-        background: C.white,
-        border: `1px solid ${C.line}`,
-        borderRadius: 8,
-        padding: "8px 10px",
-      }}
-    >
-      <div
-        style={{
-          fontFamily: FONT_COND,
-          fontWeight: 700,
-          fontSize: 20,
-          color,
-          lineHeight: 1,
-        }}
-      >
-        {valor}
-      </div>
-      <div
-        style={{
-          fontSize: 11,
-          color: C.slate,
-          textTransform: "uppercase",
-          letterSpacing: 0.4,
-          fontWeight: 700,
-          marginTop: 4,
-        }}
-      >
-        {titulo}
-      </div>
-    </div>
-  );
-}
-
-function generarResumenObservaciones(observaciones) {
-  const errores = observaciones.filter((o) => o.nivel === "ERROR").length;
-  const advertencias = observaciones.filter((o) => o.nivel === "ADVERTENCIA").length;
-
-  const filasObservadas = new Set(
-    observaciones
-      .map((o) => o.fila_excel)
-      .filter((x) => x !== null && x !== undefined && x !== "")
-  ).size;
-
-  const contador = {};
-
-  for (const o of observaciones) {
-    const nombre = simplificarTipoObservacion(o);
-    contador[nombre] = (contador[nombre] || 0) + 1;
-  }
-
-  const principales = Object.entries(contador)
-    .map(([nombre, cantidad]) => ({ nombre, cantidad }))
-    .sort((a, b) => b.cantidad - a.cantidad)
-    .slice(0, 4);
-
-  const otsObservadas = [
-    ...new Set(
-      observaciones
-        .filter((o) => String(o.campo || "").toLowerCase().includes("ot"))
-        .map((o) => String(o.valor_detectado || "").trim())
-        .filter((v) => v && v !== "EMPTY" && v !== "-")
-    ),
-  ];
-
-  const estado =
-    errores > 0
-      ? "Observado"
-      : advertencias > 0
-        ? "Con advertencias"
-        : "Validado";
-
-  return {
-    errores,
-    advertencias,
-    filasObservadas,
-    principales,
-    otsObservadas,
-    estado,
-  };
-}
-
-function simplificarTipoObservacion(o) {
-  const texto = String(o.tipo_observacion || "").toUpperCase();
-  const campo = String(o.campo || "").toUpperCase();
-
-  if (texto.includes("ACTIVIDAD SIN OT")) return "Sin OT";
-  if (texto.includes("OT CON CANTIDAD INCORRECTA")) return "OT inválida";
-  if (texto.includes("OT INICIA")) return "OT con inicio no permitido";
-  if (campo.includes("UNIDAD")) return "Unidad vacía";
-  if (campo.includes("CENTRAL")) return "Central vacía";
-  if (campo.includes("INSPECTOR")) return "Inspector vacío";
-  if (campo.includes("RT")) return "RT terceros vacío";
-  if (campo.includes("CONDICION")) return "Condición no estándar";
-
-  return o.tipo_observacion || "Observación";
-}
-
-function traducirCampo(campo) {
-  const c = String(campo || "").toLowerCase();
-
-  if (c.includes("ot")) return "OT";
-  if (c.includes("unidad")) return "Unidad / Grupo";
-  if (c.includes("central")) return "Central";
-  if (c.includes("inspector")) return "Inspector Orygen";
-  if (c.includes("rt")) return "RT terceros";
-  if (c.includes("actividad")) return "Actividad";
-  if (c.includes("condicion")) return "Condición";
-
-  return campo || "—";
-}
-
-const thObs = {
-  padding: "8px 8px",
-  textAlign: "left",
-  fontSize: 11,
-  textTransform: "uppercase",
-  letterSpacing: 0.4,
-  fontWeight: 700,
-  whiteSpace: "nowrap",
-};
-
-const tdObs = {
-  padding: "8px 8px",
-  verticalAlign: "top",
-  color: C.navy,
-  borderLeft: `1px solid ${C.line}`,
-};
-
 
 // ─── Acta de reunión ───
 function ActaSection({ wk, subs, empresas, faltantes, notify }) {
@@ -1960,34 +1370,6 @@ const thBase = {
   textAlign: "center",
   minWidth: 56,
 };
-function ordenarObservacionesParaProveedor(observaciones) {
-  const prioridadNivel = {
-    ERROR: 1,
-    ADVERTENCIA: 2,
-  };
-
-  return [...observaciones].sort((a, b) => {
-    const prioridadA = prioridadNivel[a.nivel] || 99;
-    const prioridadB = prioridadNivel[b.nivel] || 99;
-
-    if (prioridadA !== prioridadB) {
-      return prioridadA - prioridadB;
-    }
-
-    const filaA = Number(a.fila_excel || 999999);
-    const filaB = Number(b.fila_excel || 999999);
-
-    if (filaA !== filaB) {
-      return filaA - filaB;
-    }
-
-    const obsA = String(a.tipo_observacion || "");
-    const obsB = String(b.tipo_observacion || "");
-
-    return obsA.localeCompare(obsB);
-  });
-}
-
 
 function Vacio({ texto }) {
   return (
@@ -1996,4 +1378,3 @@ function Vacio({ texto }) {
     </div>
   );
 }
-
