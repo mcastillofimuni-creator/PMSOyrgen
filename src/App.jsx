@@ -422,6 +422,139 @@ export default function App() {
     }
   };
 
+
+  const revalidarSub = async (sub) => {
+    if (!sub?.id) return notify("No se encontró el ID del registro.", "err");
+    if (!sub?.fileKey) return notify("Este registro no tiene archivo para validar.", "err");
+
+    try {
+      notify("Ejecutando validación PMS...");
+
+      await supabase
+        .from("pms_archivos")
+        .update({
+          estado_validacion: "VALIDANDO...",
+          errores: 0,
+          advertencias: 0,
+          actividades: 0,
+          observaciones: 0,
+        })
+        .eq("id", sub.id);
+
+      setSubs((prev) =>
+        prev.map((x) =>
+          x.id === sub.id
+            ? {
+                ...x,
+                estadoValidacion: "VALIDANDO...",
+                errores: 0,
+                advertencias: 0,
+                actividades: 0,
+                observaciones: 0,
+              }
+            : x
+        )
+      );
+
+      await validarPmsEnApi(sub.id);
+      await reload();
+
+      notify("PMS revalidado correctamente.");
+    } catch (err) {
+      console.error("Error revalidando PMS:", err);
+
+      await supabase
+        .from("pms_archivos")
+        .update({
+          estado_validacion: "ERROR API - VALIDACIÓN NO EJECUTADA",
+          errores: 1,
+          advertencias: 0,
+        })
+        .eq("id", sub.id);
+
+      await reload();
+
+      notify(`No se pudo revalidar: ${err.message || "error desconocido"}`, "err");
+    }
+  };
+
+  const replaceFileSub = async (sub, file) => {
+    if (!sub?.id) return notify("No se encontró el ID del registro.", "err");
+    if (!file) return;
+    if (file.size > MAX_FILE) return notify(`El archivo supera ${fmtKB(MAX_FILE)}. Reduce su tamaño.`, "err");
+
+    try {
+      notify("Reemplazando archivo y ejecutando validación...");
+
+      const empresaLimpia = limpiarEmpresaPath(sub.empresa);
+      const nombreLimpio = limpiarNombreArchivo(file.name);
+      const nuevoPath = `semana-${wk.id}/${empresaLimpia}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}_${nombreLimpio}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("pms-archivos")
+        .upload(nuevoPath, file, {
+          cacheControl: "3600",
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { error: updateError } = await supabase
+        .from("pms_archivos")
+        .update({
+          archivo_nombre: file.name,
+          archivo_path: nuevoPath,
+          file_size: file.size,
+          estado_validacion: "VALIDANDO...",
+          errores: 0,
+          advertencias: 0,
+          actividades: 0,
+          observaciones: 0,
+        })
+        .eq("id", sub.id);
+
+      if (updateError) throw updateError;
+
+      setSubs((prev) =>
+        prev.map((x) =>
+          x.id === sub.id
+            ? {
+                ...x,
+                fileName: file.name,
+                fileSize: file.size,
+                fileKey: nuevoPath,
+                estadoValidacion: "VALIDANDO...",
+                errores: 0,
+                advertencias: 0,
+                actividades: 0,
+                observaciones: 0,
+              }
+            : x
+        )
+      );
+
+      await validarPmsEnApi(sub.id);
+      await reload();
+
+      notify("Archivo reemplazado y validado correctamente.");
+    } catch (err) {
+      console.error("Error reemplazando archivo:", err);
+
+      await supabase
+        .from("pms_archivos")
+        .update({
+          estado_validacion: "ERROR API - VALIDACIÓN NO EJECUTADA",
+          errores: 1,
+          advertencias: 0,
+        })
+        .eq("id", sub.id);
+
+      await reload();
+
+      notify(`No se pudo reemplazar/validar: ${err.message || "error desconocido"}`, "err");
+    }
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT, color: C.navy }}>
       <style>{`
@@ -541,6 +674,8 @@ export default function App() {
             onDownload={downloadFile}
             onSaveEmpresas={saveEmpresas}
             onGenerarPmsUnico={descargarPmsUnico}
+            onRevalidar={revalidarSub}
+            onReplaceFile={replaceFileSub}
             notify={notify}
           />
         )}
@@ -861,11 +996,81 @@ function Panel({
   onDownload,
   onSaveEmpresas,
   onGenerarPmsUnico,
+  onRevalidar,
+  onReplaceFile,
   notify,
 }) {
   const [editEmp, setEditEmp] = useState(false);
   const [nueva, setNueva] = useState("");
   const [filtroCentral, setFiltroCentral] = useState("SANTA ROSA");
+
+  const [obsAbiertas, setObsAbiertas] = useState({});
+  const [obsPorArchivo, setObsPorArchivo] = useState({});
+  const [obsLoading, setObsLoading] = useState({});
+  const [revalidandoId, setRevalidandoId] = useState(null);
+  const [reemplazandoId, setReemplazandoId] = useState(null);
+
+  const toggleObservaciones = async (sub) => {
+    if (!sub?.id) return;
+
+    if (obsAbiertas[sub.id]) {
+      setObsAbiertas((prev) => ({ ...prev, [sub.id]: false }));
+      return;
+    }
+
+    setObsAbiertas((prev) => ({ ...prev, [sub.id]: true }));
+
+    if (obsPorArchivo[sub.id]) return;
+
+    try {
+      setObsLoading((prev) => ({ ...prev, [sub.id]: true }));
+
+      const { data, error } = await supabase
+        .from("pms_observaciones")
+        .select("*")
+        .eq("pms_archivo_id", sub.id)
+        .order("fila_excel", { ascending: true });
+
+      if (error) throw error;
+
+      const ordenadas = [...(data || [])].sort((a, b) => {
+        const na = a.nivel === "ERROR" ? 0 : 1;
+        const nb = b.nivel === "ERROR" ? 0 : 1;
+        if (na !== nb) return na - nb;
+        return Number(a.fila_excel || 0) - Number(b.fila_excel || 0);
+      });
+
+      setObsPorArchivo((prev) => ({ ...prev, [sub.id]: ordenadas }));
+    } catch (err) {
+      console.error("Error leyendo observaciones:", err);
+      notify("No se pudieron cargar las observaciones.", "err");
+    } finally {
+      setObsLoading((prev) => ({ ...prev, [sub.id]: false }));
+    }
+  };
+
+  const ejecutarRevalidacion = async (sub) => {
+    try {
+      setRevalidandoId(sub.id);
+      setObsPorArchivo((prev) => ({ ...prev, [sub.id]: null }));
+      setObsAbiertas((prev) => ({ ...prev, [sub.id]: false }));
+      await onRevalidar(sub);
+    } finally {
+      setRevalidandoId(null);
+    }
+  };
+
+  const ejecutarReemplazo = async (sub, file) => {
+    try {
+      setReemplazandoId(sub.id);
+      setObsPorArchivo((prev) => ({ ...prev, [sub.id]: null }));
+      setObsAbiertas((prev) => ({ ...prev, [sub.id]: false }));
+      await onReplaceFile(sub, file);
+    } finally {
+      setReemplazandoId(null);
+    }
+  };
+
 
   const visibleSubs = subs.filter((s) => normalizarCentral(s.centralPresentada) === filtroCentral);
 
@@ -1182,71 +1387,153 @@ function Panel({
         <Vacio texto={`Los archivos subidos para ${centralActualLabel} aparecerán aquí.`} />
       ) : (
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden", marginBottom: 26 }}>
-          {visibleSubs.map((s, i) => (
-            <div
-              key={s.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "12px 14px",
-                flexWrap: "wrap",
-                borderTop: i > 0 ? `1px solid ${C.line}` : "none",
-              }}
-            >
-              <div style={{ flex: "1 1 200px", minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>
-                  {s.empresa} <span style={{ fontWeight: 500, color: C.slate }}>· {s.expositor}</span>
-                </div>
+          {visibleSubs.map((s, i) => {
+            const obs = obsPorArchivo[s.id] || [];
+            const abierto = !!obsAbiertas[s.id];
+            const cargandoObs = !!obsLoading[s.id];
+            const puedeVerObs = Number(s.observaciones || 0) > 0;
 
-                <div style={{ fontSize: 12, color: C.orange, marginTop: 2, fontWeight: 700 }}>
-                  Central declarada: {etiquetaCentral(s.centralPresentada)}
-                </div>
+            return (
+              <div
+                key={s.id}
+                style={{
+                  display: "flex",
+                  alignItems: "stretch",
+                  gap: 12,
+                  padding: "12px 14px",
+                  flexWrap: "wrap",
+                  borderTop: i > 0 ? `1px solid ${C.line}` : "none",
+                }}
+              >
+                <div style={{ flex: "1 1 460px", minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>
+                    {s.empresa} <span style={{ fontWeight: 500, color: C.slate }}>· {s.expositor}</span>
+                  </div>
 
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: s.fileKey ? C.slate : C.amber,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    fontWeight: s.fileKey ? 400 : 600,
-                    marginTop: 2,
-                  }}
-                >
-                  {s.fileKey ? `${s.fileName} · ${fmtKB(s.fileSize)}` : "⚠ Sin archivo de programa"} · registrado {fmtHora(s.uploadedAt)}
-                </div>
+                  <div style={{ fontSize: 12, color: C.orange, marginTop: 2, fontWeight: 700 }}>
+                    Central declarada: {etiquetaCentral(s.centralPresentada)}
+                  </div>
 
-                <div style={{ fontSize: 12, color: C.slate, marginTop: 2 }}>
-                  Programó: {(s.dias || []).map((d) => DIAS[d]).join(", ")} · Presentó: {(s.presento || []).length ? (s.presento || []).map((d) => DIAS[d]).join(", ") : "—"}
-                </div>
-
-                <div style={{ fontSize: 12, color: C.slate, marginTop: 2 }}>
-                  Validación: {s.estadoValidacion || "PENDIENTE"}
-                  {(s.errores || s.advertencias) ? ` · Errores: ${s.errores || 0} · Advertencias: ${s.advertencias || 0}` : ""}
-                  {(s.actividades || s.observaciones) ? ` · Actividades: ${s.actividades || 0} · Observaciones: ${s.observaciones || 0}` : ""}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: 8 }}>
-                {s.fileKey && (
-                  <button
-                    onClick={() => onDownload(s)}
-                    style={{ background: C.navy, color: C.white, border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 13, fontWeight: 600 }}
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: s.fileKey ? C.slate : C.amber,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      fontWeight: s.fileKey ? 400 : 600,
+                      marginTop: 2,
+                    }}
                   >
-                    Descargar
-                  </button>
-                )}
+                    {s.fileKey ? `${s.fileName} · ${fmtKB(s.fileSize)}` : "⚠ Sin archivo de programa"} · registrado {fmtHora(s.uploadedAt)}
+                  </div>
 
-                <button
-                  onClick={() => onDelete(s)}
-                  style={{ background: "none", color: C.red, border: `1px solid ${C.red}`, borderRadius: 6, padding: "8px 12px", fontSize: 13, fontWeight: 600 }}
-                >
-                  Eliminar
-                </button>
+                  <div style={{ fontSize: 12, color: C.slate, marginTop: 2 }}>
+                    Programó: {(s.dias || []).map((d) => DIAS[d]).join(", ")} · Presentó: {(s.presento || []).length ? (s.presento || []).map((d) => DIAS[d]).join(", ") : "—"}
+                  </div>
+
+                  <div style={{ fontSize: 12, color: C.slate, marginTop: 2 }}>
+                    Validación: {s.estadoValidacion || "PENDIENTE"}
+                    {(s.errores || s.advertencias) ? ` · Errores: ${s.errores || 0} · Advertencias: ${s.advertencias || 0}` : ""}
+                    {(s.actividades || s.observaciones) ? ` · Actividades: ${s.actividades || 0} · Observaciones: ${s.observaciones || 0}` : ""}
+                  </div>
+
+                  {puedeVerObs && (
+                    <button
+                      onClick={() => toggleObservaciones(s)}
+                      style={{
+                        marginTop: 10,
+                        background: abierto ? C.navy : C.white,
+                        color: abierto ? C.white : C.navy,
+                        border: `1px solid ${C.line}`,
+                        borderRadius: 6,
+                        padding: "7px 12px",
+                        fontSize: 13,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {abierto ? "Ocultar observaciones" : "Ver observaciones"}
+                    </button>
+                  )}
+
+                  {abierto && (
+                    <ObservacionesBox
+                      observaciones={obs}
+                      loading={cargandoObs}
+                      total={s.observaciones || 0}
+                    />
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", flex: "0 0 auto" }}>
+                  {s.fileKey && (
+                    <button
+                      onClick={() => ejecutarRevalidacion(s)}
+                      disabled={revalidandoId === s.id || reemplazandoId === s.id}
+                      title="Vuelve a ejecutar la validación sobre el Excel ya subido"
+                      style={{
+                        background: revalidandoId === s.id ? C.slate : C.green,
+                        color: C.white,
+                        border: "none",
+                        borderRadius: 6,
+                        padding: "8px 12px",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {revalidandoId === s.id ? "Revalidando..." : "Revalidar archivo actual"}
+                    </button>
+                  )}
+
+                  <label
+                    title="Sube una nueva versión del Excel manteniendo el mismo registro"
+                    style={{
+                      background: reemplazandoId === s.id ? C.slate : C.orange,
+                      color: C.white,
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "8px 12px",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      whiteSpace: "nowrap",
+                      cursor: reemplazandoId === s.id ? "not-allowed" : "pointer",
+                      opacity: reemplazandoId === s.id ? 0.75 : 1,
+                    }}
+                  >
+                    {reemplazandoId === s.id ? "Reemplazando..." : "Reemplazar archivo"}
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                      disabled={reemplazandoId === s.id || revalidandoId === s.id}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (f) ejecutarReemplazo(s, f);
+                      }}
+                      style={{ display: "none" }}
+                    />
+                  </label>
+
+                  {s.fileKey && (
+                    <button
+                      onClick={() => onDownload(s)}
+                      style={{ background: C.navy, color: C.white, border: "none", borderRadius: 6, padding: "8px 12px", fontSize: 13, fontWeight: 700 }}
+                    >
+                      Descargar
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => onDelete(s)}
+                    style={{ background: "none", color: C.red, border: `1px solid ${C.red}`, borderRadius: 6, padding: "8px 12px", fontSize: 13, fontWeight: 700 }}
+                  >
+                    Eliminar
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -1254,6 +1541,157 @@ function Panel({
     </div>
   );
 }
+
+
+function ObservacionesBox({ observaciones, loading, total }) {
+  if (loading) {
+    return (
+      <div style={{ marginTop: 12, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, fontSize: 13, color: C.slate }}>
+        Cargando observaciones...
+      </div>
+    );
+  }
+
+  if (!observaciones || observaciones.length === 0) {
+    return (
+      <div style={{ marginTop: 12, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, fontSize: 13, color: C.slate }}>
+        No se encontraron observaciones detalladas para este archivo.
+      </div>
+    );
+  }
+
+  const errores = observaciones.filter((o) => o.nivel === "ERROR").length;
+  const advertencias = observaciones.filter((o) => o.nivel === "ADVERTENCIA").length;
+  const filas = new Set(observaciones.map((o) => o.fila_excel).filter(Boolean));
+
+  const resumen = Object.entries(
+    observaciones.reduce((acc, o) => {
+      const k = o.tipo_observacion || "Observación";
+      acc[k] = (acc[k] || 0) + 1;
+      return acc;
+    }, {})
+  )
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(" · ");
+
+  const ots = Array.from(
+    new Set(
+      observaciones
+        .filter((o) => String(o.campo || "").includes("ot") && o.valor_detectado)
+        .map((o) => o.valor_detectado)
+    )
+  ).slice(0, 8);
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        border: `1px solid ${C.line}`,
+        borderRadius: 10,
+        padding: 12,
+        background: "#FFFCF8",
+        maxWidth: "100%",
+        overflowX: "auto",
+      }}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, marginBottom: 12 }}>
+        {[
+          ["Observado", "Estado", C.red],
+          [errores, "Errores", errores ? C.red : C.green],
+          [advertencias, "Advertencias", advertencias ? C.amber : C.green],
+          [filas.size, "Filas observadas", C.navy],
+        ].map(([v, t, col]) => (
+          <div key={t} style={{ border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 10px", background: C.white }}>
+            <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 20, color: col }}>{v}</div>
+            <div style={{ fontSize: 11, color: C.slate, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 }}>{t}</div>
+          </div>
+        ))}
+      </div>
+
+      {resumen && (
+        <div style={{ fontSize: 13, marginBottom: 8 }}>
+          <strong>Resumen:</strong> {resumen}
+        </div>
+      )}
+
+      {ots.length > 0 && (
+        <div style={{ fontSize: 13, marginBottom: 10 }}>
+          <strong>OTs observadas:</strong> {ots.join(", ")}
+        </div>
+      )}
+
+      <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 760, fontSize: 12 }}>
+        <thead>
+          <tr>
+            {["Nivel", "Fila", "Observación", "Actividad", "Valor detectado", "Sugerencia"].map((h) => (
+              <th
+                key={h}
+                style={{
+                  background: C.navy,
+                  color: C.white,
+                  padding: "8px 9px",
+                  textAlign: "left",
+                  fontFamily: FONT_COND,
+                  fontSize: 13,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+
+        <tbody>
+          {observaciones.slice(0, 12).map((o, idx) => {
+            const isError = o.nivel === "ERROR";
+
+            return (
+              <tr key={`${o.fila_excel}-${o.campo}-${idx}`} style={{ borderTop: `1px solid ${C.line}` }}>
+                <td style={{ padding: 8, verticalAlign: "top" }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      border: `1px solid ${isError ? C.red : C.amber}`,
+                      color: isError ? C.red : C.amber,
+                      borderRadius: 999,
+                      padding: "2px 8px",
+                      fontWeight: 800,
+                      fontSize: 11,
+                    }}
+                  >
+                    {o.nivel || "OBS"}
+                  </span>
+                </td>
+                <td style={{ padding: 8, verticalAlign: "top" }}>{o.fila_excel || "—"}</td>
+                <td style={{ padding: 8, verticalAlign: "top", fontWeight: 700 }}>
+                  {o.tipo_observacion || "Observación"}
+                  {o.campo && <div style={{ fontWeight: 400, color: C.slate, marginTop: 3 }}>Campo: {o.campo}</div>}
+                </td>
+                <td style={{ padding: 8, verticalAlign: "top" }}>
+                  {o.actividad || "—"}
+                  {o.unidad && <div style={{ color: C.slate, marginTop: 3 }}>Unidad: {o.unidad}</div>}
+                </td>
+                <td style={{ padding: 8, verticalAlign: "top" }}>{o.valor_detectado || "—"}</td>
+                <td style={{ padding: 8, verticalAlign: "top" }}>{o.sugerencia || "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {total > 12 && (
+        <div style={{ marginTop: 8, fontSize: 12, color: C.slate }}>
+          Mostrando las primeras 12 observaciones de {total}.
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ─── Acta de reunión ───
 function ActaSection({ wk, subs, empresas, faltantes, notify }) {
