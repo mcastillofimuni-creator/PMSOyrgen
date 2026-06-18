@@ -57,6 +57,35 @@ async function validarPmsEnApi(pmsArchivoId) {
   return data;
 }
 
+async function generarPmsUnicoEnApi({ semana, central }) {
+  const response = await fetch(`${PARSER_API}/generar-programa-unico`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      semana,
+      central,
+    }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || `Error ${response.status} generando PMS único`);
+  }
+
+  const blob = await response.blob();
+
+  const contentDisposition = response.headers.get("Content-Disposition") || "";
+  const match = contentDisposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
+  const filenameFromHeader = match?.[1] ? decodeURIComponent(match[1].replace(/"/g, "")) : null;
+
+  return {
+    blob,
+    filename: filenameFromHeader,
+  };
+}
+
 
 
 // Storage local solo para configuración de empresas y acta.
@@ -364,6 +393,35 @@ export default function App() {
     }
   };
 
+  const descargarPmsUnico = async ({ semana, central }) => {
+    try {
+      notify("Generando PMS único...");
+
+      const { blob, filename } = await generarPmsUnicoEnApi({ semana, central });
+
+      const centralNombre = central === "VENTANILLA" ? "VENTANILLA" : "SANTA_ROSA";
+      const nombreFinal =
+        filename ||
+        `PMS_${getNumeroPms(semana)}_PROGRAMA_UNICO_${centralNombre}_${semana}.xlsx`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+
+      a.href = url;
+      a.download = nombreFinal;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      URL.revokeObjectURL(url);
+
+      notify("PMS único generado correctamente.");
+    } catch (err) {
+      console.error("Error generando PMS único:", err);
+      notify(`No se pudo generar el PMS único: ${err.message || "error desconocido"}`, "err");
+    }
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT, color: C.navy }}>
       <style>{`
@@ -482,6 +540,7 @@ export default function App() {
             onDelete={deleteSub}
             onDownload={downloadFile}
             onSaveEmpresas={saveEmpresas}
+            onGenerarPmsUnico={descargarPmsUnico}
             notify={notify}
           />
         )}
@@ -791,7 +850,19 @@ function FormProveedor({ wk, empresas, onSaved, notify }) {
 }
 
 // ─── Panel del supervisor ───
-function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete, onDownload, onSaveEmpresas, notify }) {
+function Panel({
+  wk,
+  subs,
+  loading,
+  hoyIdx,
+  empresas,
+  onTogglePresento,
+  onDelete,
+  onDownload,
+  onSaveEmpresas,
+  onGenerarPmsUnico,
+  notify,
+}) {
   const [editEmp, setEditEmp] = useState(false);
   const [nueva, setNueva] = useState("");
   const [filtroCentral, setFiltroCentral] = useState("SANTA ROSA");
@@ -852,6 +923,63 @@ function Panel({ wk, subs, loading, hoyIdx, empresas, onTogglePresento, onDelete
             <div style={{ fontSize: 12, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>{t}</div>
           </div>
         ))}
+      </div>
+
+      <div
+        style={{
+          background: C.white,
+          border: `1px solid ${C.line}`,
+          borderRadius: 10,
+          padding: "14px 16px",
+          marginBottom: 22,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontFamily: FONT_COND,
+              fontWeight: 700,
+              fontSize: 18,
+              textTransform: "uppercase",
+              letterSpacing: 0.6,
+              color: C.navy,
+            }}
+          >
+            PMS {getNumeroPms(wk.id)} · Programa único
+          </div>
+
+          <div style={{ fontSize: 13, color: C.slate, marginTop: 2 }}>
+            Genera el consolidado de {centralActualLabel} para la semana {fmtRango(wk)}.
+          </div>
+        </div>
+
+        <button
+          onClick={() =>
+            onGenerarPmsUnico({
+              semana: wk.id,
+              central: filtroCentral,
+            })
+          }
+          disabled={visibleSubs.length === 0}
+          style={{
+            background: visibleSubs.length === 0 ? C.slate : C.green,
+            color: C.white,
+            border: "none",
+            borderRadius: 8,
+            padding: "11px 16px",
+            fontSize: 14,
+            fontWeight: 800,
+            whiteSpace: "nowrap",
+            opacity: visibleSubs.length === 0 ? 0.65 : 1,
+          }}
+        >
+          Descargar PMS único
+        </button>
       </div>
 
       <h3 style={sectionTitle}>Matriz semanal · programado vs presentado</h3>
