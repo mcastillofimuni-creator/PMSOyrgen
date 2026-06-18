@@ -22,6 +22,23 @@ const C = {
   amberBg: "#FCF3DC",
 };
 
+function getNumeroPms(fechaSemana) {
+  const d = new Date(`${fechaSemana}T00:00:00`);
+
+  // Copia de fecha para cálculo ISO
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+
+  // Jueves de esa semana
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+
+  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+
+  return weekNo;
+}
+
 const CENTRALES = [
   { label: "C. T. Santa Rosa", value: "SANTA ROSA" },
   { label: "C.C. Ventanilla", value: "VENTANILLA" },
