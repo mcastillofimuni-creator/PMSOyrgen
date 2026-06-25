@@ -87,6 +87,32 @@ async function generarPmsUnicoEnApi({ semana, central }) {
 }
 
 
+async function generarActaInterferenciasEnApi(payload) {
+  const response = await fetch(`${PARSER_API}/generar-acta-interferencias`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || `Error ${response.status} generando acta`);
+  }
+
+  const blob = await response.blob();
+
+  const contentDisposition = response.headers.get("Content-Disposition") || "";
+  const match = contentDisposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
+  const filenameFromHeader = match?.[1] ? decodeURIComponent(match[1].replace(/"/g, "")) : null;
+
+  return {
+    blob,
+    filename: filenameFromHeader,
+  };
+}
+
 
 // Storage local solo para configuración de empresas y acta.
 // Los PMS ya se guardan en Supabase.
@@ -157,6 +183,14 @@ const fmtHora = (ts) => {
 };
 
 const fmtKB = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
+
+const fmtFechaPunto = (d = new Date()) => {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}.${mm}.${yyyy}`;
+};
+
 
 function limpiarNombreArchivo(nombre) {
   return String(nombre || "programa.xlsx")
@@ -1552,7 +1586,7 @@ function Panel({
         </div>
       )}
 
-      <ActaSection wk={wk} subs={visibleSubs} empresas={empresas} faltantes={faltantes} notify={notify} />
+      <ActaSection wk={wk} subs={visibleSubs} empresas={empresas} faltantes={faltantes} centralActualLabel={centralActualLabel} filtroCentral={filtroCentral} notify={notify} />
     </div>
   );
 }
@@ -1709,129 +1743,102 @@ function ObservacionesBox({ observaciones, loading, total }) {
 
 
 // ─── Acta de reunión ───
-function ActaSection({ wk, subs, empresas, faltantes, notify }) {
-  const [transcript, setTranscript] = useState("");
-  const [acta, setActa] = useState("");
+function ActaSection({ wk, subs, empresas, faltantes, centralActualLabel, filtroCentral, notify }) {
+  const [notas, setNotas] = useState("");
   const [genAt, setGenAt] = useState(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setActa("");
-    setTranscript("");
+    setNotas("");
     setGenAt(null);
 
     (async () => {
       try {
-        const r = await storage.get(`acta:${wk.id}`, true);
+        const r = await storage.get(`acta:notas:${wk.id}:${filtroCentral}`, true);
         if (r?.value) {
           const d = JSON.parse(r.value);
-          setActa(d.acta || "");
-          setTranscript(d.transcript || "");
+          setNotas(d.notas || "");
           setGenAt(d.generatedAt || null);
         }
       } catch {}
     })();
-  }, [wk.id]);
+  }, [wk.id, filtroCentral]);
 
   const loadTxt = (file) => {
     if (!file) return;
     const r = new FileReader();
-    r.onload = () => setTranscript(String(r.result || ""));
+    r.onload = () => setNotas(String(r.result || ""));
     r.readAsText(file);
   };
 
+  const diasTexto = (indices) =>
+    (indices || [])
+      .map((d) => `${DIAS[d]} ${fmtDia(wk.dates[d])}`)
+      .join(", ");
+
+  const armarPayloadActa = () => {
+    const empresasPayload = subs.map((s) => ({
+      empresa: s.empresa || "",
+      expositor: s.expositor || "",
+      contrato: "",
+      estado_validacion: s.estadoValidacion || "",
+      programo: (s.dias || []).map((d) => `${DIAS[d]} ${fmtDia(wk.dates[d])}`),
+      presento: (s.presento || []).map((d) => `${DIAS[d]} ${fmtDia(wk.dates[d])}`),
+      archivo: s.fileName || "",
+    }));
+
+    return {
+      semana: wk.id,
+      pms: `PMS ${getNumeroPms(wk.id)}`,
+      rango_semana: fmtRango(wk),
+      fecha_reunion: fmtFechaPunto(new Date()),
+      central: centralActualLabel || etiquetaCentral(filtroCentral),
+      notas,
+      empresas: empresasPayload,
+      faltantes,
+      participantes_adicionales: [],
+      acciones: [],
+    };
+  };
+
   const generar = async () => {
-    if (!transcript.trim()) return notify("Pega o sube primero la transcripción de la reunión.", "err");
+    if (subs.length === 0) return notify("No hay registros para generar el acta.", "err");
 
     setBusy(true);
 
     try {
-      const contexto = subs
-        .map(
-          (s) =>
-            `- ${s.empresa} | Central: ${etiquetaCentral(s.centralPresentada)} | Expositor: ${s.expositor} | Programó: ${(s.dias || []).map((d) => `${DIAS[d]} ${fmtDia(wk.dates[d])}`).join(", ")} | Presentó: ${(s.presento || []).length ? (s.presento || []).map((d) => DIAS[d]).join(", ") : "ninguno aún"} | Archivo: ${s.fileName || "no subió programa"}`
-        )
-        .join("\n");
+      const payload = armarPayloadActa();
+      const { blob, filename } = await generarActaInterferenciasEnApi(payload);
 
-      const prompt = `Eres asistente del Supervisor de Mantenimiento Eléctrico de Orygen Perú. Redacta el ACTA DE REUNIÓN SEMANAL DE PROVEEDORES en español formal y técnico, en formato Markdown.
+      const nombreFinal =
+        filename ||
+        `ACTA_INTERFERENCIAS_PMS_${getNumeroPms(wk.id)}_${filtroCentral}_${wk.id}.docx`;
 
-DATOS DE LA SEMANA (Sábado a Viernes, ${fmtRango(wk)}):
-Empresas registradas en la plataforma:
-${contexto || "(ninguna registrada)"}
-Empresas que NO subieron su programa: ${faltantes.length ? faltantes.join(", ") : "ninguna"}
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
 
-TRANSCRIPCIÓN DE LA REUNIÓN:
-${transcript}
+      a.href = url;
+      a.download = nombreFinal;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
 
-ESTRUCTURA REQUERIDA del acta:
-# ACTA DE REUNIÓN SEMANAL DE PROVEEDORES
-1. **Datos generales**: fecha de la reunión, semana operativa (rango de fechas), área (Mantenimiento Eléctrico).
-2. **Asistentes**: tabla o lista de empresa, central declarada y expositor (cruza los registros de la plataforma con lo mencionado en la transcripción).
-3. **Desarrollo**: resumen por empresa de lo expuesto (actividades de la semana, avances, restricciones), basado estrictamente en la transcripción.
-4. **Acuerdos y compromisos**: lista numerada con responsable y fecha límite cuando se mencione.
-5. **Pendientes y observaciones**: incluye empresas que no subieron programa o no expusieron.
-6. **Próxima reunión**: si se menciona.
-
-Reglas: no inventes información que no esté en la transcripción ni en los datos; si algo no se mencionó, indícalo como "no tratado". Responde SOLO con el acta en Markdown, sin preámbulo.`;
-
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-
-      const data = await response.json();
-
-      const texto = (data.content || [])
-        .filter((b) => b.type === "text")
-        .map((b) => b.text)
-        .join("\n")
-        .trim();
-
-      if (!texto) throw new Error("vacío");
-
-      setActa(texto);
+      URL.revokeObjectURL(url);
 
       const now = Date.now();
       setGenAt(now);
 
       try {
-        await storage.set(`acta:${wk.id}`, JSON.stringify({ transcript, acta: texto, generatedAt: now }), true);
+        await storage.set(`acta:notas:${wk.id}:${filtroCentral}`, JSON.stringify({ notas, generatedAt: now }), true);
       } catch {}
 
-      notify("Acta generada y guardada.");
-    } catch {
-      notify("No se pudo generar el acta. Intenta de nuevo.", "err");
+      notify("Acta oficial generada correctamente.");
+    } catch (err) {
+      console.error("Error generando acta:", err);
+      notify(`No se pudo generar el acta: ${err.message || "error desconocido"}`, "err");
     } finally {
       setBusy(false);
     }
-  };
-
-  const copiar = async () => {
-    try {
-      await navigator.clipboard.writeText(acta);
-      notify("Acta copiada al portapapeles.");
-    } catch {
-      notify("No se pudo copiar.", "err");
-    }
-  };
-
-  const descargarDoc = () => {
-    const html = mdToHtml(acta);
-    const doc = `<html xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><style>body{font-family:Barlow,Arial,sans-serif;color:#16222E;line-height:1.5}h1{color:#D64100;border-bottom:2px solid #D64100;padding-bottom:6px}h2{color:#16222E}table{border-collapse:collapse}td,th{border:1px solid #999;padding:4px 8px}</style></head><body>${html}</body></html>`;
-    const blob = new Blob(["\ufeff", doc], { type: "application/msword" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-
-    a.href = url;
-    a.download = `Acta_Reunion_Proveedores_${wk.id}.doc`;
-    a.click();
-
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -1840,13 +1847,22 @@ Reglas: no inventes información que no esté en la transcripción ni en los dat
 
       <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
         <p style={{ fontSize: 14, color: C.slate, margin: "0 0 10px" }}>
-          Pega la transcripción resumida (Copilot) o sube el archivo .txt. El acta se genera cruzando la transcripción con los registros de la matriz semanal filtrada.
+          Escribe comentarios relevantes, participantes adicionales o acuerdos. La plataforma generará el Word oficial usando la plantilla RG02-P.HS.PE.013, sin llamar a una IA externa.
         </p>
 
         <textarea
-          value={transcript}
-          onChange={(e) => setTranscript(e.target.value)}
-          placeholder="Pega aquí la transcripción de la reunión…"
+          value={notas}
+          onChange={(e) => setNotas(e.target.value)}
+          placeholder={`Ejemplo:
+Comentarios relevantes:
+No se detectaron interferencias relevantes.
+
+Participantes adicionales:
+Hector Tinoco (Orygen - HSE&Q)
+Manuel Castillo (Orygen - Mantenimiento)
+
+Acciones:
+JMI regularizar observaciones del programa.`}
           rows={7}
           style={{ width: "100%", boxSizing: "border-box", padding: 12, border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 14, resize: "vertical", color: C.navy }}
         />
@@ -1871,59 +1887,70 @@ Reglas: no inventes información que no esté en la transcripción ni en los dat
               type="file"
               accept=".txt,.md,.vtt,text/plain"
               onChange={(e) => loadTxt(e.target.files?.[0])}
-              aria-label="Subir transcripción en texto"
+              aria-label="Subir notas en texto"
               style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer" }}
             />
           </div>
 
           <button
             onClick={generar}
-            disabled={busy}
-            style={{ background: busy ? C.slate : C.orange, color: C.white, border: "none", borderRadius: 8, padding: "10px 18px", fontSize: 14, fontWeight: 700 }}
+            disabled={busy || subs.length === 0}
+            style={{
+              background: busy || subs.length === 0 ? C.slate : C.orange,
+              color: C.white,
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 18px",
+              fontSize: 14,
+              fontWeight: 700,
+              opacity: subs.length === 0 ? 0.65 : 1,
+            }}
           >
-            {busy ? "Generando acta…" : "Generar acta de reunión"}
+            {busy ? "Generando Word…" : "Generar acta oficial"}
           </button>
         </div>
 
-        {acta && (
-          <div style={{ marginTop: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 12, color: C.slate, fontWeight: 600 }}>
-                {genAt ? `Generada ${fmtHora(genAt)} · guardada para esta semana` : ""}
-              </span>
+        <div style={{ marginTop: 12, fontSize: 12, color: C.slate }}>
+          Se incluirán automáticamente {subs.length} participante(s) del panel filtrado para {centralActualLabel}.
+          {faltantes?.length ? ` Empresas pendientes: ${faltantes.join(", ")}.` : " No hay empresas pendientes de registro en la lista actual."}
+          {genAt ? ` Última acta generada: ${fmtHora(genAt)}.` : ""}
+        </div>
 
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  onClick={copiar}
-                  style={{ background: "none", border: `1px solid ${C.line}`, borderRadius: 6, padding: "7px 12px", fontSize: 13, fontWeight: 600, color: C.navy }}
-                >
-                  Copiar
-                </button>
-
-                <button
-                  onClick={descargarDoc}
-                  style={{ background: C.navy, color: C.white, border: "none", borderRadius: 6, padding: "7px 12px", fontSize: 13, fontWeight: 600 }}
-                >
-                  Descargar Word
-                </button>
-              </div>
-            </div>
-
-            <div
-              style={{
-                border: `1px solid ${C.line}`,
-                borderRadius: 8,
-                padding: 16,
-                background: "#FBF8F4",
-                fontSize: 14,
-                lineHeight: 1.55,
-                whiteSpace: "pre-wrap",
-                maxHeight: 420,
-                overflowY: "auto",
-              }}
-            >
-              {acta}
-            </div>
+        {subs.length > 0 && (
+          <div style={{ marginTop: 14, border: `1px solid ${C.line}`, borderRadius: 8, overflowX: "auto" }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 640, fontSize: 12 }}>
+              <thead>
+                <tr>
+                  {["Empresa", "Expositor", "Programó", "Presentó", "Estado"].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        background: C.navy,
+                        color: C.white,
+                        padding: "7px 8px",
+                        textAlign: "left",
+                        fontFamily: FONT_COND,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.4,
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {subs.map((s) => (
+                  <tr key={s.id} style={{ borderTop: `1px solid ${C.line}` }}>
+                    <td style={{ padding: 8, fontWeight: 700 }}>{s.empresa}</td>
+                    <td style={{ padding: 8 }}>{s.expositor}</td>
+                    <td style={{ padding: 8 }}>{diasTexto(s.dias) || "—"}</td>
+                    <td style={{ padding: 8 }}>{diasTexto(s.presento) || "—"}</td>
+                    <td style={{ padding: 8 }}>{s.estadoValidacion || "PENDIENTE"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
