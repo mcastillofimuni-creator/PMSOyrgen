@@ -151,6 +151,47 @@ async function validarPmsContraSapEnApi({ semana, central }) {
   return data;
 }
 
+async function validarOtsControlSapEnApi({ password, semana, central, file }) {
+  const formData = new FormData();
+  formData.append("password", password);
+  formData.append("semana", semana);
+  formData.append("central", central);
+  formData.append("file", file);
+
+  const response = await fetch(`${PARSER_API}/control-sap/validar-ots`, {
+    method: "POST",
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || `Error ${response.status} validando OTs`);
+  }
+
+  return data;
+}
+
+async function actualizarOtControlSapEnApi({ password, actividadId, otNueva }) {
+  const response = await fetch(`${PARSER_API}/control-sap/actualizar-ot`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      password,
+      actividad_id: actividadId,
+      ot_nueva: otNueva,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || `Error ${response.status} actualizando OT`);
+  }
+
+  return data;
+}
+
 
 // Storage local solo para configuración de empresas y acta.
 // Los PMS ya se guardan en Supabase.
@@ -348,6 +389,8 @@ export default function App() {
   const [toast, setToast] = useState(null);
 
   const wk = weekInfo(offset);
+  const params = new URLSearchParams(window.location.search);
+  const esControlSap = params.get("view") === "control-sap";
 
   const hoyIdx = (() => {
     if (offset !== 0) return -1;
@@ -641,6 +684,10 @@ export default function App() {
       notify(`No se pudo reemplazar/validar: ${err.message || "error desconocido"}`, "err");
     }
   };
+
+  if (esControlSap) {
+    return <ControlSapPage notify={notify} />;
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT, color: C.navy }}>
@@ -1624,11 +1671,10 @@ function Panel({
         </div>
       )}
 
-      <SapControlSection
+      <AbrirControlSapSection
         wk={wk}
         filtroCentral={filtroCentral}
         centralActualLabel={centralActualLabel}
-        notify={notify}
       />
 
       <ActaSection wk={wk} subs={visibleSubs} empresas={empresas} faltantes={faltantes} centralActualLabel={centralActualLabel} filtroCentral={filtroCentral} notify={notify} />
@@ -1787,6 +1833,276 @@ function ObservacionesBox({ observaciones, loading, total }) {
 }
 
 
+
+
+function AbrirControlSapSection({ wk, filtroCentral, centralActualLabel }) {
+  const abrir = () => {
+    const params = new URLSearchParams();
+    params.set("view", "control-sap");
+    params.set("semana", wk.id);
+    params.set("central", filtroCentral);
+    params.set("pms", String(getNumeroPms(wk.id) || ""));
+    params.set("rango", fmtRango(wk));
+    window.open(`${window.location.origin}${window.location.pathname}?${params.toString()}`, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: "14px 16px", marginBottom: 26, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div>
+        <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.6, color: C.navy }}>
+          Control SAP OT/Avisos
+        </div>
+        <div style={{ fontSize: 13, color: C.slate, marginTop: 2 }}>
+          Abre una vista privada para validar las OTs del PMS {getNumeroPms(wk.id)} de {centralActualLabel}.
+        </div>
+      </div>
+      <button
+        onClick={abrir}
+        style={{ background: C.navy, color: C.white, border: "none", borderRadius: 8, padding: "11px 16px", fontSize: 14, fontWeight: 800, whiteSpace: "nowrap" }}
+      >
+        Abrir control SAP
+      </button>
+    </div>
+  );
+}
+
+function ControlSapPage({ notify }) {
+  const params = new URLSearchParams(window.location.search);
+  const semana = params.get("semana") || "";
+  const central = params.get("central") || "SANTA ROSA";
+  const pms = params.get("pms") || "";
+  const rango = params.get("rango") || semana;
+
+  const [password, setPassword] = useState("");
+  const [sapFile, setSapFile] = useState(null);
+  const [validando, setValidando] = useState(false);
+  const [resultado, setResultado] = useState(null);
+  const [manualPorFila, setManualPorFila] = useState({});
+  const [actualizando, setActualizando] = useState({});
+  const [localToast, setLocalToast] = useState(null);
+
+  const avisar = (msg, kind = "ok") => {
+    if (notify) notify(msg, kind);
+    setLocalToast({ msg, kind });
+    setTimeout(() => setLocalToast(null), 3500);
+  };
+
+  const validar = async () => {
+    if (!password.trim()) return avisar("Ingresa la clave de Control SAP.", "err");
+    if (!sapFile) return avisar("Selecciona el Excel SAP de OTs/Avisos.", "err");
+    if (sapFile.size > MAX_SAP_FILE) return avisar(`El archivo supera ${fmtKB(MAX_SAP_FILE)}.`, "err");
+
+    try {
+      setValidando(true);
+      avisar("Validando OTs contra SAP...");
+      const data = await validarOtsControlSapEnApi({ password, semana, central, file: sapFile });
+      setResultado(data);
+      avisar("Validación SAP completada.");
+    } catch (err) {
+      console.error("Error validando Control SAP:", err);
+      avisar(`No se pudo validar: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setValidando(false);
+    }
+  };
+
+  const cambiarOt = async (fila, ot) => {
+    const otFinal = String(ot || "").trim();
+    if (!otFinal) return avisar("Ingresa una OT para actualizar.", "err");
+    if (!fila?.actividad_id) return avisar("No se encontró el ID de actividad.", "err");
+
+    try {
+      setActualizando((prev) => ({ ...prev, [fila.actividad_id]: true }));
+      await actualizarOtControlSapEnApi({ password, actividadId: fila.actividad_id, otNueva: otFinal });
+      setResultado((prev) => ({
+        ...prev,
+        filas: (prev?.filas || []).map((x) =>
+          x.actividad_id === fila.actividad_id
+            ? { ...x, numero_pms: otFinal, estado: "ACTUALIZADA", observacion: "OT actualizada manualmente desde Control SAP." }
+            : x
+        ),
+      }));
+      avisar(`OT actualizada a ${otFinal}.`);
+    } catch (err) {
+      console.error("Error actualizando OT:", err);
+      avisar(`No se pudo actualizar la OT: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setActualizando((prev) => ({ ...prev, [fila.actividad_id]: false }));
+    }
+  };
+
+  const resumen = resultado?.resumen || {};
+  const filas = resultado?.filas || [];
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT, color: C.navy }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap');
+        button { font-family: inherit; cursor: pointer; }
+        input, select, textarea { font-family: inherit; }
+        *:focus-visible { outline: 2px solid ${C.orange}; outline-offset: 2px; }
+      `}</style>
+
+      <header style={{ background: C.navy, color: C.white, padding: "18px 22px" }}>
+        <div style={{ maxWidth: 1280, margin: "0 auto" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 24, letterSpacing: 1, color: C.orangeLight, textTransform: "uppercase" }}>
+              Control SAP OT/Avisos
+            </span>
+            <span style={{ fontSize: 13, color: "#9AA7B2" }}>Vista privada · Planificación de Mantenimiento</span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 14, color: "#C6D0DA" }}>
+            PMS {pms || "—"} · {etiquetaCentral(central)} · {rango}
+          </div>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 1280, margin: "0 auto", padding: "22px 16px 60px" }}>
+        <h3 style={sectionTitle}>Validación privada de OTs</h3>
+
+        <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 260px) minmax(220px, 1fr) auto", gap: 12, alignItems: "end" }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Clave</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Clave de Control SAP"
+                style={{ width: "100%", marginTop: 6, padding: "10px 12px", border: `1px solid ${C.line}`, borderRadius: 8, boxSizing: "border-box" }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Archivo SAP</label>
+              <div style={{ marginTop: 6, position: "relative" }}>
+                <div style={{ padding: "10px 12px", border: `1.5px dashed ${sapFile ? C.green : C.orange}`, borderRadius: 8, color: sapFile ? C.green : C.orange, fontWeight: 700, background: sapFile ? C.greenBg : C.white }}>
+                  {sapFile ? `${sapFile.name} · ${fmtKB(sapFile.size)}` : "Seleccionar Excel SAP de OTs/Avisos"}
+                </div>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                  onChange={(e) => setSapFile(e.target.files?.[0] || null)}
+                  style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={validar}
+              disabled={validando}
+              style={{ background: validando ? C.slate : C.orange, color: C.white, border: "none", borderRadius: 8, padding: "12px 18px", fontWeight: 900, whiteSpace: "nowrap" }}
+            >
+              {validando ? "Validando..." : "Validar OTs"}
+            </button>
+          </div>
+        </div>
+
+        {resultado && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(140px, 1fr))", gap: 12, marginBottom: 18 }}>
+              {[
+                ["Actividades revisadas", resumen.actividades_revisadas || 0, C.navy],
+                ["OTs OK", resumen.ots_ok || 0, C.green],
+                ["Avisos como OT", resumen.avisos_como_ot || 0, C.amber],
+                ["No encontradas", resumen.no_encontradas || 0, C.red],
+                ["Sugeridas", resumen.sugeridas || 0, C.blue],
+                ["Estado no operativo", resumen.estado_no_operativo || 0, C.red],
+              ].map(([t, v, col]) => (
+                <div key={t} style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px" }}>
+                  <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 26, color: col }}>{v}</div>
+                  <div style={{ fontSize: 12, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>{t}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1280, fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    {[
+                      "Estado", "Empresa", "Fila", "OT PMS", "Actividad PMS", "Unidad", "OT SAP", "Descripción SAP", "OT sugerida", "Descripción sugerida", "Score", "Acción"
+                    ].map((h) => <th key={h} style={{ ...thBase, textAlign: "left" }}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filas.map((fila, idx) => {
+                    const manual = manualPorFila[fila.actividad_id] || "";
+                    const busy = !!actualizando[fila.actividad_id];
+                    const estadoColor = fila.estado === "OK" || fila.estado === "ACTUALIZADA" ? C.green : fila.estado === "NO_ENCONTRADA" ? C.red : C.amber;
+                    return (
+                      <tr key={`${fila.actividad_id || idx}-${fila.numero_pms}-${idx}`} style={{ borderTop: `1px solid ${C.line}` }}>
+                        <td style={{ padding: 10, color: estadoColor, fontWeight: 900 }}>{fila.estado}</td>
+                        <td style={{ padding: 10 }}>{fila.empresa}</td>
+                        <td style={{ padding: 10 }}>{fila.fila_excel}</td>
+                        <td style={{ padding: 10, fontWeight: 700 }}>{fila.numero_pms || "—"}</td>
+                        <td style={{ padding: 10, minWidth: 220 }}>
+                          <div>{fila.actividad_pms || "—"}</div>
+                          <div style={{ color: C.slate, fontSize: 12 }}>{fila.observacion}</div>
+                        </td>
+                        <td style={{ padding: 10 }}>{fila.unidad_pms || "—"}</td>
+                        <td style={{ padding: 10 }}>{fila.ot_sap || "—"}</td>
+                        <td style={{ padding: 10, minWidth: 220 }}>{fila.descripcion_sap || "—"}</td>
+                        <td style={{ padding: 10, fontWeight: 700, color: fila.ot_sugerida ? C.green : C.slate }}>{fila.ot_sugerida || "—"}</td>
+                        <td style={{ padding: 10, minWidth: 220 }}>{fila.descripcion_sugerida || "—"}</td>
+                        <td style={{ padding: 10 }}>{fila.score_sugerencia || 0}</td>
+                        <td style={{ padding: 10, minWidth: 250 }}>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <button
+                              disabled={!fila.ot_sugerida || busy}
+                              onClick={() => cambiarOt(fila, fila.ot_sugerida)}
+                              style={{ background: !fila.ot_sugerida || busy ? C.slate : C.green, color: C.white, border: "none", borderRadius: 6, padding: "7px 9px", fontWeight: 800 }}
+                            >
+                              Cambiar
+                            </button>
+                            <input
+                              value={manual}
+                              onChange={(e) => setManualPorFila((prev) => ({ ...prev, [fila.actividad_id]: e.target.value }))}
+                              placeholder="OT manual"
+                              style={{ width: 95, padding: "7px 8px", border: `1px solid ${C.line}`, borderRadius: 6 }}
+                            />
+                            <button
+                              disabled={!manual.trim() || busy}
+                              onClick={() => cambiarOt(fila, manual)}
+                              style={{ background: !manual.trim() || busy ? C.slate : C.navy, color: C.white, border: "none", borderRadius: 6, padding: "7px 9px", fontWeight: 800 }}
+                            >
+                              Guardar manual
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </main>
+
+      {localToast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 20,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: localToast.kind === "err" ? C.red : C.navy,
+            color: C.white,
+            padding: "10px 18px",
+            borderRadius: 8,
+            fontSize: 14,
+            fontWeight: 600,
+            zIndex: 100,
+            boxShadow: "0 4px 16px rgba(0,0,0,.25)",
+          }}
+        >
+          {localToast.msg}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Maestro SAP y validación contra SAP ───
 function SapControlSection({ wk, filtroCentral, centralActualLabel, notify }) {
