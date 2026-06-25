@@ -1879,6 +1879,7 @@ function ControlSapPage({ notify }) {
   const [resultado, setResultado] = useState(null);
   const [manualPorFila, setManualPorFila] = useState({});
   const [cambiosPreparados, setCambiosPreparados] = useState([]);
+  const [mostrarOk, setMostrarOk] = useState(false);
   const [localToast, setLocalToast] = useState(null);
 
   const avisar = (msg, kind = "ok") => {
@@ -1898,6 +1899,7 @@ function ControlSapPage({ notify }) {
     try {
       setValidando(true);
       setCambiosPreparados([]);
+      setMostrarOk(false);
       avisar("Validando OTs contra SAP...");
       const data = await validarOtsControlSapEnApi({ password, semana, central, file: sapFile });
       setResultado(data);
@@ -1961,6 +1963,9 @@ function ControlSapPage({ notify }) {
 
   const resumen = resultado?.resumen || {};
   const filas = resultado?.filas || [];
+  const filasVisibles = mostrarOk
+    ? filas
+    : filas.filter((f) => !["OK", "ACTUALIZADA"].includes(String(f?.estado || "").toUpperCase()));
 
   const celda = {
     padding: "9px 8px",
@@ -2053,10 +2058,30 @@ function ControlSapPage({ notify }) {
                 ["Sugeridas", resumen.sugeridas || 0, C.blue],
                 ["Estado no operativo", resumen.estado_no_operativo || 0, C.red],
               ].map(([t, v, col]) => (
-                <div key={t} style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px" }}>
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    if (t === "OTs OK") setMostrarOk((prev) => !prev);
+                  }}
+                  title={t === "OTs OK" ? "Click para mostrar/ocultar las OTs OK" : ""}
+                  style={{
+                    textAlign: "left",
+                    background: t === "OTs OK" && mostrarOk ? C.greenBg : C.white,
+                    border: t === "OTs OK" && mostrarOk ? `1.5px solid ${C.green}` : `1px solid ${C.line}`,
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                    cursor: t === "OTs OK" ? "pointer" : "default",
+                  }}
+                >
                   <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 26, color: col }}>{v}</div>
                   <div style={{ fontSize: 12, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>{t}</div>
-                </div>
+                  {t === "OTs OK" && (
+                    <div style={{ fontSize: 11, color: C.slate, marginTop: 4 }}>
+                      {mostrarOk ? "Mostrando OK" : "Ocultas por defecto"}
+                    </div>
+                  )}
+                </button>
               ))}
             </div>
 
@@ -2080,7 +2105,13 @@ function ControlSapPage({ notify }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filas.map((fila, idx) => {
+                  {filasVisibles.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ ...celda, padding: 18, color: C.slate, textAlign: "center" }}>
+                        No hay observaciones pendientes para mostrar. Las OTs OK están ocultas por defecto. Haz click en la tarjeta “OTs OK” para verlas.
+                      </td>
+                    </tr>
+                  ) : filasVisibles.map((fila, idx) => {
                     const key = filaKey(fila, idx);
                     const manual = manualPorFila[key] || "";
                     const estadoColor = fila.estado === "OK" || fila.estado === "ACTUALIZADA" ? C.green : fila.estado === "NO_ENCONTRADA" ? C.red : C.amber;
