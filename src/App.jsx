@@ -151,12 +151,13 @@ async function validarPmsContraSapEnApi({ semana, central }) {
   return data;
 }
 
-async function validarOtsControlSapEnApi({ password, semana, central, file }) {
+async function validarOtsControlSapEnApi({ password, semana, central, ordenesFile, avisosFile }) {
   const formData = new FormData();
   formData.append("password", password);
   formData.append("semana", semana);
   formData.append("central", central);
-  formData.append("file", file);
+  formData.append("file_ordenes", ordenesFile);
+  if (avisosFile) formData.append("file_avisos", avisosFile);
 
   const response = await fetch(`${PARSER_API}/control-sap/validar-ots`, {
     method: "POST",
@@ -1874,7 +1875,8 @@ function ControlSapPage({ notify }) {
   const rango = params.get("rango") || semana;
 
   const [password, setPassword] = useState("");
-  const [sapFile, setSapFile] = useState(null);
+  const [ordenesFile, setOrdenesFile] = useState(null);
+  const [avisosFile, setAvisosFile] = useState(null);
   const [validando, setValidando] = useState(false);
   const [resultado, setResultado] = useState(null);
   const [manualPorFila, setManualPorFila] = useState({});
@@ -1893,15 +1895,16 @@ function ControlSapPage({ notify }) {
 
   const validar = async () => {
     if (!password.trim()) return avisar("Ingresa la clave de Control SAP.", "err");
-    if (!sapFile) return avisar("Selecciona el Excel SAP de OTs/Avisos.", "err");
-    if (sapFile.size > MAX_SAP_FILE) return avisar(`El archivo supera ${fmtKB(MAX_SAP_FILE)}.`, "err");
+    if (!ordenesFile) return avisar("Selecciona el Excel SAP de Órdenes de mantenimiento.", "err");
+    if (ordenesFile.size > MAX_SAP_FILE) return avisar(`El archivo de órdenes supera ${fmtKB(MAX_SAP_FILE)}.`, "err");
+    if (avisosFile && avisosFile.size > MAX_SAP_FILE) return avisar(`El archivo de avisos supera ${fmtKB(MAX_SAP_FILE)}.`, "err");
 
     try {
       setValidando(true);
       setCambiosPreparados([]);
       setMostrarOk(false);
-      avisar("Validando OTs contra SAP...");
-      const data = await validarOtsControlSapEnApi({ password, semana, central, file: sapFile });
+      avisar(avisosFile ? "Validando OTs y avisos contra SAP..." : "Validando OTs contra SAP...");
+      const data = await validarOtsControlSapEnApi({ password, semana, central, ordenesFile, avisosFile });
       setResultado(data);
       avisar("Validación SAP completada.");
     } catch (err) {
@@ -2030,7 +2033,7 @@ function ControlSapPage({ notify }) {
         <h3 style={sectionTitle}>Validación privada de OTs</h3>
 
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 260px) minmax(220px, 1fr) auto", gap: 12, alignItems: "end" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(170px, 240px) minmax(220px, 1fr) minmax(220px, 1fr) auto", gap: 12, alignItems: "end" }}>
             <div>
               <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Clave</label>
               <input
@@ -2043,15 +2046,30 @@ function ControlSapPage({ notify }) {
             </div>
 
             <div>
-              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Archivo SAP</label>
+              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Archivo SAP de Órdenes</label>
               <div style={{ marginTop: 6, position: "relative" }}>
-                <div style={{ padding: "10px 12px", border: `1.5px dashed ${sapFile ? C.green : C.orange}`, borderRadius: 8, color: sapFile ? C.green : C.orange, fontWeight: 700, background: sapFile ? C.greenBg : C.white }}>
-                  {sapFile ? `${sapFile.name} · ${fmtKB(sapFile.size)}` : "Seleccionar Excel SAP de OTs/Avisos"}
+                <div style={{ padding: "10px 12px", border: `1.5px dashed ${ordenesFile ? C.green : C.orange}`, borderRadius: 8, color: ordenesFile ? C.green : C.orange, fontWeight: 700, background: ordenesFile ? C.greenBg : C.white }}>
+                  {ordenesFile ? `${ordenesFile.name} · ${fmtKB(ordenesFile.size)}` : "Seleccionar Excel SAP de OTs"}
                 </div>
                 <input
                   type="file"
                   accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
-                  onChange={(e) => setSapFile(e.target.files?.[0] || null)}
+                  onChange={(e) => setOrdenesFile(e.target.files?.[0] || null)}
+                  style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Archivo SAP de Avisos</label>
+              <div style={{ marginTop: 6, position: "relative" }}>
+                <div style={{ padding: "10px 12px", border: `1.5px dashed ${avisosFile ? C.green : C.orange}`, borderRadius: 8, color: avisosFile ? C.green : C.orange, fontWeight: 700, background: avisosFile ? C.greenBg : C.white }}>
+                  {avisosFile ? `${avisosFile.name} · ${fmtKB(avisosFile.size)}` : "Seleccionar Excel SAP de Avisos (opcional)"}
+                </div>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                  onChange={(e) => setAvisosFile(e.target.files?.[0] || null)}
                   style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
                 />
               </div>
@@ -2062,8 +2080,11 @@ function ControlSapPage({ notify }) {
               disabled={validando}
               style={{ background: validando ? C.slate : C.orange, color: C.white, border: "none", borderRadius: 8, padding: "12px 18px", fontWeight: 900, whiteSpace: "nowrap" }}
             >
-              {validando ? "Validando..." : "Validar OTs"}
+              {validando ? "Validando..." : "Validar OTs/Avisos"}
             </button>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: C.slate }}>
+            El archivo de avisos mejora el cruce cuando el proveedor colocó un aviso en vez de una OT o cuando la OT aún no fue generada.
           </div>
         </div>
 
