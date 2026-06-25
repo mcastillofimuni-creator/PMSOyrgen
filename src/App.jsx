@@ -35,6 +35,7 @@ const DIAS = ["Sáb", "Dom", "Lun", "Mar", "Mié", "Jue", "Vie"];
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const EMPRESAS_DEFAULT = ["MAGNEX", "UNITELEC", "SEFREL", "DIM", "T&D ELECTRIC", "MAQUIRENTAS"];
 const MAX_FILE = 3.5 * 1024 * 1024;
+const MAX_SAP_FILE = 20 * 1024 * 1024;
 const PARSER_API = "https://api-parser-pms.onrender.com";
 
 async function validarPmsEnApi(pmsArchivoId) {
@@ -111,6 +112,43 @@ async function generarActaInterferenciasEnApi(payload) {
     blob,
     filename: filenameFromHeader,
   };
+}
+
+
+async function cargarMaestroSapEnApi(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${PARSER_API}/cargar-maestro-sap`, {
+    method: "POST",
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || `Error ${response.status} cargando maestro SAP`);
+  }
+
+  return data;
+}
+
+async function validarPmsContraSapEnApi({ semana, central }) {
+  const response = await fetch(`${PARSER_API}/validar-pms-contra-sap`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ semana, central }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || `Error ${response.status} validando contra SAP`);
+  }
+
+  return data;
 }
 
 
@@ -1586,6 +1624,13 @@ function Panel({
         </div>
       )}
 
+      <SapControlSection
+        wk={wk}
+        filtroCentral={filtroCentral}
+        centralActualLabel={centralActualLabel}
+        notify={notify}
+      />
+
       <ActaSection wk={wk} subs={visibleSubs} empresas={empresas} faltantes={faltantes} centralActualLabel={centralActualLabel} filtroCentral={filtroCentral} notify={notify} />
     </div>
   );
@@ -1741,6 +1786,212 @@ function ObservacionesBox({ observaciones, loading, total }) {
   );
 }
 
+
+
+// ─── Maestro SAP y validación contra SAP ───
+function SapControlSection({ wk, filtroCentral, centralActualLabel, notify }) {
+  const [sapFile, setSapFile] = useState(null);
+  const [cargandoSap, setCargandoSap] = useState(false);
+  const [validandoSap, setValidandoSap] = useState(false);
+  const [sapResumen, setSapResumen] = useState(null);
+  const [sapValidacion, setSapValidacion] = useState(null);
+
+  const cargarSap = async () => {
+    if (!sapFile) return notify("Selecciona primero el Excel SAP de órdenes de mantenimiento.", "err");
+    if (sapFile.size > MAX_SAP_FILE) return notify(`El archivo SAP supera ${fmtKB(MAX_SAP_FILE)}.`, "err");
+
+    try {
+      setCargandoSap(true);
+      notify("Cargando maestro SAP...");
+      const data = await cargarMaestroSapEnApi(sapFile);
+      setSapResumen(data);
+      setSapValidacion(null);
+      notify(`Maestro SAP cargado: ${data.ots_extraidas || 0} OTs y ${data.avisos_extraidos || 0} avisos.`);
+    } catch (err) {
+      console.error("Error cargando maestro SAP:", err);
+      notify(`No se pudo cargar el maestro SAP: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setCargandoSap(false);
+    }
+  };
+
+  const validarSap = async () => {
+    try {
+      setValidandoSap(true);
+      notify("Validando PMS contra maestro SAP...");
+      const data = await validarPmsContraSapEnApi({
+        semana: wk.id,
+        central: filtroCentral,
+      });
+      setSapValidacion(data);
+      notify(`Validación SAP terminada: ${data.observaciones_generadas || 0} observaciones.`);
+    } catch (err) {
+      console.error("Error validando contra SAP:", err);
+      notify(`No se pudo validar contra SAP: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setValidandoSap(false);
+    }
+  };
+
+  const estados = sapResumen?.estados || {};
+  const centrales = sapResumen?.centrales || {};
+  const obs = sapValidacion?.observaciones || [];
+
+  return (
+    <div style={{ marginBottom: 26 }}>
+      <h3 style={sectionTitle}>Maestro SAP OT/Avisos</h3>
+
+      <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+        <p style={{ fontSize: 14, color: C.slate, margin: "0 0 12px" }}>
+          Carga el Excel de órdenes de mantenimiento exportado desde SAP. Luego valida el PMS filtrado de {centralActualLabel} contra las OTs y avisos reales.
+        </p>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+          <label
+            style={{
+              background: C.cream,
+              color: C.slate,
+              border: `1px solid ${C.line}`,
+              borderRadius: 8,
+              padding: "9px 12px",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            Seleccionar Excel SAP
+            <input
+              type="file"
+              accept=".xlsx,.xls,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              onChange={(e) => setSapFile(e.target.files?.[0] || null)}
+              style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
+            />
+          </label>
+
+          <button
+            onClick={cargarSap}
+            disabled={!sapFile || cargandoSap}
+            style={{
+              background: !sapFile || cargandoSap ? C.slate : C.green,
+              color: C.white,
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 14px",
+              fontSize: 13,
+              fontWeight: 800,
+            }}
+          >
+            {cargandoSap ? "Cargando..." : "Cargar maestro SAP"}
+          </button>
+
+          <button
+            onClick={validarSap}
+            disabled={validandoSap}
+            style={{
+              background: validandoSap ? C.slate : C.orange,
+              color: C.white,
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 14px",
+              fontSize: 13,
+              fontWeight: 800,
+            }}
+          >
+            {validandoSap ? "Validando..." : "Validar PMS contra SAP"}
+          </button>
+
+          {sapFile && (
+            <span style={{ fontSize: 13, color: C.slate }}>
+              {sapFile.name} · {fmtKB(sapFile.size)}
+            </span>
+          )}
+        </div>
+
+        {sapResumen && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: 10, marginBottom: 14 }}>
+            {[
+              [sapResumen.registros_validos || 0, "Registros SAP", C.navy],
+              [sapResumen.ots_extraidas || 0, "OTs extraídas", C.green],
+              [sapResumen.avisos_extraidos || 0, "Avisos extraídos", C.blue],
+              [estados.LIBERADO || 0, "Liberadas", C.green],
+              [estados.CERRADO_TEC || 0, "Cerradas", C.amber],
+              [estados.BORRADO || 0, "Borradas", C.red],
+            ].map(([v, t, col]) => (
+              <div key={t} style={{ border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 10px", background: C.cream }}>
+                <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 22, color: col }}>{v}</div>
+                <div style={{ fontSize: 11, color: C.slate, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 }}>{t}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {sapResumen && (
+          <div style={{ fontSize: 12, color: C.slate, marginBottom: 12 }}>
+            Centrales detectadas: {Object.entries(centrales).map(([k, v]) => `${k}: ${v}`).join(" · ") || "—"}
+          </div>
+        )}
+
+        {sapValidacion && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 12 }}>
+              {[
+                [sapValidacion.actividades_revisadas || 0, "Actividades revisadas", C.navy],
+                [sapValidacion.ots_validas || 0, "OTs válidas", C.green],
+                [sapValidacion.avisos_colocados_como_ot || 0, "Avisos como OT", C.amber],
+                [sapValidacion.ots_no_encontradas || 0, "No encontradas", C.red],
+                [sapValidacion.ots_estado_no_operativo || 0, "Estado no operativo", C.amber],
+                [sapValidacion.avisos_sin_ot || 0, "Avisos sin OT", C.amber],
+              ].map(([v, t, col]) => (
+                <div key={t} style={{ border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 10px", background: C.white }}>
+                  <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 22, color: col }}>{v}</div>
+                  <div style={{ fontSize: 11, color: C.slate, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 }}>{t}</div>
+                </div>
+              ))}
+            </div>
+
+            {obs.length > 0 ? (
+              <div style={{ overflowX: "auto", border: `1px solid ${C.line}`, borderRadius: 8 }}>
+                <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 850, fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {["Nivel", "Empresa", "Fila", "Número", "Observación", "Sugerencia"].map((h) => (
+                        <th key={h} style={{ background: C.navy, color: C.white, padding: "8px 9px", textAlign: "left", fontFamily: FONT_COND, fontSize: 13, textTransform: "uppercase" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {obs.slice(0, 20).map((o, idx) => (
+                      <tr key={`${o.numero_informado}-${idx}`} style={{ borderTop: `1px solid ${C.line}` }}>
+                        <td style={{ padding: 8, fontWeight: 800, color: o.nivel === "ERROR" ? C.red : C.amber }}>{o.nivel}</td>
+                        <td style={{ padding: 8 }}>{o.proveedor || "—"}</td>
+                        <td style={{ padding: 8 }}>{o.fila_excel || "—"}</td>
+                        <td style={{ padding: 8 }}>{o.numero_informado || "—"}</td>
+                        <td style={{ padding: 8 }}>
+                          <strong>{o.tipo_observacion || "Observación"}</strong>
+                          <div style={{ color: C.slate, marginTop: 2 }}>{o.detalle || "—"}</div>
+                          {o.actividad && <div style={{ color: C.slate, marginTop: 2 }}>Actividad: {o.actividad}</div>}
+                        </td>
+                        <td style={{ padding: 8 }}>{o.sugerencia || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: C.green, fontWeight: 700 }}>
+                No se generaron observaciones SAP para el PMS filtrado.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─── Acta de reunión ───
 function ActaSection({ wk, subs, empresas, faltantes, centralActualLabel, filtroCentral, notify }) {
