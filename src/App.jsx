@@ -1878,7 +1878,7 @@ function ControlSapPage({ notify }) {
   const [validando, setValidando] = useState(false);
   const [resultado, setResultado] = useState(null);
   const [manualPorFila, setManualPorFila] = useState({});
-  const [actualizando, setActualizando] = useState({});
+  const [cambiosPreparados, setCambiosPreparados] = useState([]);
   const [localToast, setLocalToast] = useState(null);
 
   const avisar = (msg, kind = "ok") => {
@@ -1887,6 +1887,9 @@ function ControlSapPage({ notify }) {
     setTimeout(() => setLocalToast(null), 3500);
   };
 
+  const filaKey = (fila, idx = 0) =>
+    String(fila?.actividad_id || `${fila?.empresa || ""}-${fila?.fila_excel || ""}-${fila?.numero_pms || ""}-${idx}`);
+
   const validar = async () => {
     if (!password.trim()) return avisar("Ingresa la clave de Control SAP.", "err");
     if (!sapFile) return avisar("Selecciona el Excel SAP de OTs/Avisos.", "err");
@@ -1894,6 +1897,7 @@ function ControlSapPage({ notify }) {
 
     try {
       setValidando(true);
+      setCambiosPreparados([]);
       avisar("Validando OTs contra SAP...");
       const data = await validarOtsControlSapEnApi({ password, semana, central, file: sapFile });
       setResultado(data);
@@ -1906,33 +1910,73 @@ function ControlSapPage({ notify }) {
     }
   };
 
-  const cambiarOt = async (fila, ot) => {
-    const otFinal = String(ot || "").trim();
-    if (!otFinal) return avisar("Ingresa una OT para actualizar.", "err");
-    if (!fila?.actividad_id) return avisar("No se encontró el ID de actividad.", "err");
+  const prepararCambio = (fila, accion, otFinal) => {
+    const key = filaKey(fila);
+    const otLimpia = String(otFinal || "").trim();
 
-    try {
-      setActualizando((prev) => ({ ...prev, [fila.actividad_id]: true }));
-      await actualizarOtControlSapEnApi({ password, actividadId: fila.actividad_id, otNueva: otFinal });
-      setResultado((prev) => ({
-        ...prev,
-        filas: (prev?.filas || []).map((x) =>
-          x.actividad_id === fila.actividad_id
-            ? { ...x, numero_pms: otFinal, estado: "ACTUALIZADA", observacion: "OT actualizada manualmente desde Control SAP." }
-            : x
-        ),
-      }));
-      avisar(`OT actualizada a ${otFinal}.`);
-    } catch (err) {
-      console.error("Error actualizando OT:", err);
-      avisar(`No se pudo actualizar la OT: ${err.message || "error desconocido"}`, "err");
-    } finally {
-      setActualizando((prev) => ({ ...prev, [fila.actividad_id]: false }));
+    if (accion !== "MANTENER" && !otLimpia) {
+      return avisar("Ingresa una OT o usa Mantener sin cambiar.", "err");
     }
+
+    const cambio = {
+      key,
+      actividad_id: fila.actividad_id || "",
+      empresa: fila.empresa || "",
+      fila_excel: fila.fila_excel || "",
+      actividad_pms: fila.actividad_pms || "",
+      unidad_pms: fila.unidad_pms || "",
+      aviso: fila.aviso_sap || fila.aviso_pms || "",
+      ot_original: fila.numero_pms || "",
+      accion,
+      ot_final: accion === "MANTENER" ? (fila.numero_pms || "") : otLimpia,
+      descripcion_final:
+        accion === "SUGERIDA"
+          ? (fila.descripcion_sugerida || fila.descripcion_sap || "")
+          : accion === "MANTENER"
+            ? "Se mantiene el valor informado en el PMS."
+            : "OT ingresada manualmente por el supervisor.",
+      estado: accion === "MANTENER" ? "SIN CAMBIO" : "PENDIENTE DE APLICAR",
+    };
+
+    setCambiosPreparados((prev) => {
+      const sinActual = prev.filter((x) => x.key !== key);
+      return [...sinActual, cambio];
+    });
+
+    avisar(
+      accion === "MANTENER"
+        ? "Fila marcada para mantener sin cambiar."
+        : "Cambio preparado. Aún no modifica el PMS.",
+      "ok"
+    );
+  };
+
+  const eliminarCambio = (key) => {
+    setCambiosPreparados((prev) => prev.filter((x) => x.key !== key));
+  };
+
+  const aplicarCambiosEstructura = () => {
+    avisar("Botón preparado. La aplicación real al PMS se conectará en el siguiente paso.", "ok");
   };
 
   const resumen = resultado?.resumen || {};
   const filas = resultado?.filas || [];
+
+  const celda = {
+    padding: "9px 8px",
+    verticalAlign: "top",
+    borderTop: `1px solid ${C.line}`,
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
+  };
+
+  const thCompact = {
+    ...thBase,
+    textAlign: "left",
+    padding: "9px 8px",
+    whiteSpace: "normal",
+    lineHeight: 1.15,
+  };
 
   return (
     <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT, color: C.navy }}>
@@ -1944,7 +1988,7 @@ function ControlSapPage({ notify }) {
       `}</style>
 
       <header style={{ background: C.navy, color: C.white, padding: "18px 22px" }}>
-        <div style={{ maxWidth: 1280, margin: "0 auto" }}>
+        <div style={{ maxWidth: 1440, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 24, letterSpacing: 1, color: C.orangeLight, textTransform: "uppercase" }}>
               Control SAP OT/Avisos
@@ -1957,7 +2001,7 @@ function ControlSapPage({ notify }) {
         </div>
       </header>
 
-      <main style={{ maxWidth: 1280, margin: "0 auto", padding: "22px 16px 60px" }}>
+      <main style={{ maxWidth: 1440, margin: "0 auto", padding: "22px 16px 60px" }}>
         <h3 style={sectionTitle}>Validación privada de OTs</h3>
 
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
@@ -2000,7 +2044,7 @@ function ControlSapPage({ notify }) {
 
         {resultado && (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(140px, 1fr))", gap: 12, marginBottom: 18 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(130px, 1fr))", gap: 12, marginBottom: 18 }}>
               {[
                 ["Actividades revisadas", resumen.actividades_revisadas || 0, C.navy],
                 ["OTs OK", resumen.ots_ok || 0, C.green],
@@ -2016,57 +2060,81 @@ function ControlSapPage({ notify }) {
               ))}
             </div>
 
-            <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflowX: "auto" }}>
-              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1280, fontSize: 13 }}>
+            <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden", marginBottom: 22 }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed", fontSize: 12 }}>
+                <colgroup>
+                  <col style={{ width: "9%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "8%" }} />
+                  <col style={{ width: "8%" }} />
+                  <col style={{ width: "21%" }} />
+                  <col style={{ width: "20%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "9%" }} />
+                </colgroup>
                 <thead>
                   <tr>
-                    {[
-                      "Estado", "Empresa", "Fila", "OT PMS", "Actividad PMS", "Unidad", "OT SAP", "Descripción SAP", "OT sugerida", "Descripción sugerida", "Score", "Acción"
-                    ].map((h) => <th key={h} style={{ ...thBase, textAlign: "left" }}>{h}</th>)}
+                    {["Empresa / fila", "OT PMS", "Aviso", "Unidad", "Actividad PMS", "SAP encontrado", "Sugerencia", "Acción"].map((h) => (
+                      <th key={h} style={thCompact}>{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {filas.map((fila, idx) => {
-                    const manual = manualPorFila[fila.actividad_id] || "";
-                    const busy = !!actualizando[fila.actividad_id];
+                    const key = filaKey(fila, idx);
+                    const manual = manualPorFila[key] || "";
                     const estadoColor = fila.estado === "OK" || fila.estado === "ACTUALIZADA" ? C.green : fila.estado === "NO_ENCONTRADA" ? C.red : C.amber;
+                    const yaPreparado = cambiosPreparados.some((x) => x.key === key);
                     return (
-                      <tr key={`${fila.actividad_id || idx}-${fila.numero_pms}-${idx}`} style={{ borderTop: `1px solid ${C.line}` }}>
-                        <td style={{ padding: 10, color: estadoColor, fontWeight: 900 }}>{fila.estado}</td>
-                        <td style={{ padding: 10 }}>{fila.empresa}</td>
-                        <td style={{ padding: 10 }}>{fila.fila_excel}</td>
-                        <td style={{ padding: 10, fontWeight: 700 }}>{fila.numero_pms || "—"}</td>
-                        <td style={{ padding: 10, minWidth: 220 }}>
-                          <div>{fila.actividad_pms || "—"}</div>
-                          <div style={{ color: C.slate, fontSize: 12 }}>{fila.observacion}</div>
+                      <tr key={key} style={{ background: yaPreparado ? C.greenBg : C.white }}>
+                        <td style={celda}>
+                          <div style={{ fontWeight: 900, color: estadoColor }}>{fila.estado || "—"}</div>
+                          <div style={{ fontWeight: 800 }}>{fila.empresa || "—"}</div>
+                          <div style={{ color: C.slate }}>Fila {fila.fila_excel || "—"}</div>
                         </td>
-                        <td style={{ padding: 10 }}>{fila.unidad_pms || "—"}</td>
-                        <td style={{ padding: 10 }}>{fila.ot_sap || "—"}</td>
-                        <td style={{ padding: 10, minWidth: 220 }}>{fila.descripcion_sap || "—"}</td>
-                        <td style={{ padding: 10, fontWeight: 700, color: fila.ot_sugerida ? C.green : C.slate }}>{fila.ot_sugerida || "—"}</td>
-                        <td style={{ padding: 10, minWidth: 220 }}>{fila.descripcion_sugerida || "—"}</td>
-                        <td style={{ padding: 10 }}>{fila.score_sugerencia || 0}</td>
-                        <td style={{ padding: 10, minWidth: 250 }}>
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <td style={{ ...celda, fontWeight: 800 }}>{fila.numero_pms || "—"}</td>
+                        <td style={celda}>{fila.aviso_sap || fila.aviso_pms || "—"}</td>
+                        <td style={celda}>{fila.unidad_pms || "—"}</td>
+                        <td style={celda}>
+                          <div>{fila.actividad_pms || "—"}</div>
+                          <div style={{ color: C.slate, fontSize: 11, marginTop: 4 }}>{fila.observacion}</div>
+                        </td>
+                        <td style={celda}>
+                          <div style={{ fontWeight: 800 }}>{fila.ot_sap || "—"}</div>
+                          <div>{fila.descripcion_sap || "—"}</div>
+                        </td>
+                        <td style={celda}>
+                          <div style={{ color: fila.ot_sugerida ? C.green : C.slate, fontWeight: 900 }}>{fila.ot_sugerida || "—"}</div>
+                          <div>{fila.descripcion_sugerida || "—"}</div>
+                          <div style={{ color: C.slate, fontSize: 11, marginTop: 4 }}>Score: {fila.score_sugerencia || 0}</div>
+                        </td>
+                        <td style={celda}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                             <button
-                              disabled={!fila.ot_sugerida || busy}
-                              onClick={() => cambiarOt(fila, fila.ot_sugerida)}
-                              style={{ background: !fila.ot_sugerida || busy ? C.slate : C.green, color: C.white, border: "none", borderRadius: 6, padding: "7px 9px", fontWeight: 800 }}
+                              disabled={!fila.ot_sugerida}
+                              onClick={() => prepararCambio(fila, "SUGERIDA", fila.ot_sugerida)}
+                              style={{ background: !fila.ot_sugerida ? C.slate : C.green, color: C.white, border: "none", borderRadius: 6, padding: "7px 8px", fontWeight: 800 }}
                             >
                               Cambiar
                             </button>
                             <input
                               value={manual}
-                              onChange={(e) => setManualPorFila((prev) => ({ ...prev, [fila.actividad_id]: e.target.value }))}
+                              onChange={(e) => setManualPorFila((prev) => ({ ...prev, [key]: e.target.value }))}
                               placeholder="OT manual"
-                              style={{ width: 95, padding: "7px 8px", border: `1px solid ${C.line}`, borderRadius: 6 }}
+                              style={{ width: "100%", padding: "7px 8px", border: `1px solid ${C.line}`, borderRadius: 6, boxSizing: "border-box" }}
                             />
                             <button
-                              disabled={!manual.trim() || busy}
-                              onClick={() => cambiarOt(fila, manual)}
-                              style={{ background: !manual.trim() || busy ? C.slate : C.navy, color: C.white, border: "none", borderRadius: 6, padding: "7px 9px", fontWeight: 800 }}
+                              disabled={!manual.trim()}
+                              onClick={() => prepararCambio(fila, "MANUAL", manual)}
+                              style={{ background: !manual.trim() ? C.slate : C.navy, color: C.white, border: "none", borderRadius: 6, padding: "7px 8px", fontWeight: 800 }}
                             >
                               Guardar manual
+                            </button>
+                            <button
+                              onClick={() => prepararCambio(fila, "MANTENER", fila.numero_pms)}
+                              style={{ background: C.white, color: C.navy, border: `1px solid ${C.line}`, borderRadius: 6, padding: "7px 8px", fontWeight: 800 }}
+                            >
+                              Mantener sin cambiar
                             </button>
                           </div>
                         </td>
@@ -2075,6 +2143,72 @@ function ControlSapPage({ notify }) {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            <h3 style={sectionTitle}>Cambios preparados</h3>
+            {cambiosPreparados.length === 0 ? (
+              <div style={{ background: C.white, border: `1px dashed ${C.line}`, borderRadius: 10, padding: 18, color: C.slate, marginBottom: 18 }}>
+                Aún no hay decisiones preparadas. Usa Cambiar, Guardar manual o Mantener sin cambiar en la tabla superior.
+              </div>
+            ) : (
+              <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden", marginBottom: 18 }}>
+                <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed", fontSize: 13 }}>
+                  <colgroup>
+                    <col style={{ width: "14%" }} />
+                    <col style={{ width: "8%" }} />
+                    <col style={{ width: "10%" }} />
+                    <col style={{ width: "10%" }} />
+                    <col style={{ width: "10%" }} />
+                    <col style={{ width: "12%" }} />
+                    <col style={{ width: "28%" }} />
+                    <col style={{ width: "8%" }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      {["Empresa", "Fila", "OT original", "Aviso", "Acción", "OT final", "Detalle", "Quitar"].map((h) => <th key={h} style={thCompact}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cambiosPreparados.map((c) => (
+                      <tr key={c.key}>
+                        <td style={celda}>{c.empresa}</td>
+                        <td style={celda}>{c.fila_excel}</td>
+                        <td style={celda}>{c.ot_original || "—"}</td>
+                        <td style={celda}>{c.aviso || "—"}</td>
+                        <td style={{ ...celda, fontWeight: 900 }}>{c.accion}</td>
+                        <td style={{ ...celda, fontWeight: 900, color: c.accion === "MANTENER" ? C.slate : C.green }}>{c.ot_final || "—"}</td>
+                        <td style={celda}>
+                          <div>{c.actividad_pms}</div>
+                          <div style={{ color: C.slate, marginTop: 3 }}>{c.descripcion_final}</div>
+                        </td>
+                        <td style={celda}>
+                          <button onClick={() => eliminarCambio(c.key)} style={{ background: C.redBg, color: C.red, border: `1px solid ${C.red}`, borderRadius: 6, padding: "6px 8px", fontWeight: 800 }}>
+                            Quitar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                onClick={aplicarCambiosEstructura}
+                disabled={cambiosPreparados.length === 0}
+                style={{
+                  background: cambiosPreparados.length === 0 ? C.slate : C.orange,
+                  color: C.white,
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "12px 18px",
+                  fontWeight: 900,
+                  opacity: cambiosPreparados.length === 0 ? 0.6 : 1,
+                }}
+              >
+                Aplicar cambios a PMS
+              </button>
             </div>
           </>
         )}
