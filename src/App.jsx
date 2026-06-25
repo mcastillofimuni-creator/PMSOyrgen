@@ -1929,13 +1929,24 @@ function ControlSapPage({ notify }) {
       (/^(3500|4500)\d+/i.test(String(fila.numero_pms || "")) ? fila.numero_pms : "") ||
       "";
 
+    const esAvisoSinOt = String(fila.estado || "").toUpperCase() === "AVISO_SIN_OT";
+
     const codPmSugerido =
       fila.cod_pm_sugerido ||
       fila.cod_pm_sap ||
-      fila.plan_pm_sap ||
       fila.aviso_sap ||
       fila.aviso_pms ||
+      fila.plan_pm_sap ||
       "";
+
+    const accionFinal = esAvisoSinOt && accion === "MANTENER" ? "AVISO SIN OT" : accion;
+
+    const otFinal =
+      esAvisoSinOt && accion === "MANTENER"
+        ? ""
+        : accion === "MANTENER"
+          ? (fila.numero_pms || "")
+          : otLimpia;
 
     const cambio = {
       key,
@@ -1944,21 +1955,23 @@ function ControlSapPage({ notify }) {
       fila_excel: fila.fila_excel || "",
       actividad_pms: fila.actividad_pms || "",
       unidad_pms: fila.unidad_pms || "",
-      aviso: fila.aviso_sap || fila.aviso_pms || "",
+      aviso: fila.aviso_sap || fila.aviso_pms || (esAvisoSinOt ? fila.numero_pms : "") || "",
       ot_original: fila.numero_pms || "",
       pedido_original: fila.pedido_pms || pedidoDetectado || "",
-      accion,
-      ot_final: accion === "MANTENER" ? (fila.numero_pms || "") : otLimpia,
+      accion: accionFinal,
+      ot_final: otFinal,
       plan_pm_final: codPmSugerido,
       pedido_final: pedidoDetectado || fila.pedido_sap || "",
       descripcion_sap_referencial: fila.descripcion_sugerida || fila.descripcion_sap || "",
       descripcion_final:
         accion === "SUGERIDA"
           ? "Se corrige OT/Pedido según sugerencia SAP. El motivo PMS no se modifica."
-          : accion === "MANTENER"
-            ? "Se mantiene el valor informado en el PMS."
-            : "OT ingresada manualmente por el supervisor. El motivo PMS no se modifica.",
-      estado: accion === "MANTENER" ? "SIN CAMBIO" : "PENDIENTE DE APLICAR",
+          : esAvisoSinOt && accion === "MANTENER"
+            ? "Se mantiene como Aviso/COD PM. No se coloca OT porque SAP no muestra OT asociada."
+            : accion === "MANTENER"
+              ? "Se mantiene el valor informado en el PMS."
+              : "OT ingresada manualmente por el supervisor. El motivo PMS no se modifica.",
+      estado: accionFinal === "MANTENER" || accionFinal === "AVISO SIN OT" ? "SIN CAMBIO" : "PENDIENTE DE APLICAR",
     };
 
     setCambiosPreparados((prev) => {
@@ -2179,7 +2192,7 @@ function ControlSapPage({ notify }) {
                         </td>
                         <td style={celda}>
                           <div><b>OT:</b> <span style={{ color: fila.ot_sugerida ? C.green : C.slate, fontWeight: 900 }}>{fila.ot_sugerida || "—"}</span></div>
-                          <div><b>Plan/COD:</b> {fila.cod_pm_sugerido || fila.cod_pm_sap || fila.plan_pm_sap || "—"}</div>
+                          <div><b>COD PM/AVISO:</b> {fila.cod_pm_sugerido || fila.cod_pm_sap || fila.plan_pm_sap || "—"}</div>
                           <div><b>Pedido:</b> {fila.pedido_sugerido || fila.pedido_detectado || fila.pedido_sap || "—"}</div>
                           <div style={{ color: C.slate, marginTop: 4 }}>{fila.descripcion_sugerida || "—"}</div>
                           <div style={{ color: C.slate, fontSize: 11, marginTop: 4 }}>Score: {fila.score_sugerencia || 0}</div>
@@ -2229,7 +2242,7 @@ function ControlSapPage({ notify }) {
             ) : (
               <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden", marginBottom: 18 }}>
                 <div style={{ padding: "9px 10px", fontSize: 12, color: C.slate, borderBottom: `1px solid ${C.line}` }}>
-                  Estos cambios todavía no modifican el PMS. El motivo/actividad del proveedor se conserva; solo se preparan OT, Plan/COD PM y Pedido.
+                  Estos cambios todavía no modifican el PMS. El motivo/actividad del proveedor se conserva; solo se preparan OT, COD PM/AVISO y Pedido.
                 </div>
                 <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed", fontSize: 12 }}>
                   <colgroup>
@@ -2246,7 +2259,7 @@ function ControlSapPage({ notify }) {
                   </colgroup>
                   <thead>
                     <tr>
-                      {["Empresa", "Fila", "OT/Pedido informado", "Aviso informado", "Acción", "OT final", "Plan/COD PM sugerido", "Pedido sugerido", "Actividad PMS / Referencia SAP", "Quitar"].map((h) => <th key={h} style={thCompact}>{h}</th>)}
+                      {["Empresa", "Fila", "OT/Pedido informado", "Aviso informado", "Acción", "OT final", "COD PM/AVISO", "Pedido sugerido", "Actividad PMS / Referencia SAP", "Quitar"].map((h) => <th key={h} style={thCompact}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -2257,7 +2270,7 @@ function ControlSapPage({ notify }) {
                         <td style={celda}>{c.ot_original || "—"}</td>
                         <td style={celda}>{c.aviso || "—"}</td>
                         <td style={{ ...celda, fontWeight: 900 }}>{c.accion}</td>
-                        <td style={{ ...celda, fontWeight: 900, color: c.accion === "MANTENER" ? C.slate : C.green }}>{c.ot_final || "—"}</td>
+                        <td style={{ ...celda, fontWeight: 900, color: (c.accion === "MANTENER" || c.accion === "AVISO SIN OT") ? C.slate : C.green }}>{c.ot_final || "—"}</td>
                         <td style={{ ...celda, fontWeight: 800 }}>{c.plan_pm_final || "—"}</td>
                         <td style={{ ...celda, fontWeight: 800 }}>{c.pedido_final || "—"}</td>
                         <td style={celda}>
