@@ -120,8 +120,23 @@ function saturdayOf(date) {
   return d;
 }
 
+function nextSaturdayOf(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+
+  // JavaScript: Dom=0, Lun=1, ..., Sáb=6.
+  // Para proveedores, la semana objetivo por defecto es el próximo PMS.
+  // Si hoy ya es sábado, se usa ese mismo sábado.
+  const daysUntilSaturday = (6 - d.getDay() + 7) % 7;
+  d.setDate(d.getDate() + daysUntilSaturday);
+
+  return d;
+}
+
 function weekInfo(offset) {
-  const start = saturdayOf(new Date());
+  // Offset 0 ya no es la semana operativa actual, sino la próxima semana PMS.
+  // Ejemplo: 24/06/2026 -> 27/06/2026 -> PMS 26.
+  const start = nextSaturdayOf(new Date());
   start.setDate(start.getDate() + offset * 7);
   const dates = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(start);
@@ -601,7 +616,7 @@ export default function App() {
 
               <div style={{ fontSize: 13, color: "#9AA7B2", marginTop: 2 }}>
                 {fmtRango(wk)}
-                {offset === 0 && <span style={{ color: C.orangeLight, fontWeight: 600 }}> · actual</span>}
+                {offset === 0 && <span style={{ color: C.orangeLight, fontWeight: 600 }}> · próximo</span>}
               </div>
             </div>
 
@@ -618,7 +633,7 @@ export default function App() {
                 onClick={() => setOffset(0)}
                 style={{ background: "transparent", color: C.orangeLight, border: `1px solid ${C.orangeLight}`, borderRadius: 6, padding: "6px 10px", fontSize: 13, fontWeight: 600 }}
               >
-                Hoy
+                PMS próximo
               </button>
             )}
           </div>
