@@ -864,7 +864,7 @@ export default function App() {
         </div>
       </nav>
 
-      <main style={{ maxWidth: 1040, margin: "0 auto", padding: "20px 16px 60px" }}>
+      <main style={{ maxWidth: tab === "control_ot" ? 1600 : 1040, width: tab === "control_ot" ? "min(1600px, calc(100vw - 32px))" : "auto", margin: "0 auto", padding: "20px 16px 60px" }}>
         {tab === "proveedor" ? (
           <FormProveedor
             wk={wk}
@@ -2066,13 +2066,19 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
           fecha_programada: a.fecha_programada_control,
           marca: ctrl.marca,
           nota: ctrl.nota || "",
+          tipo: "PLANIFICADA",
         };
       })
       .filter(Boolean),
     ...adicionales
       .filter((a) => ["FINAL", "PARCIAL"].includes(a.marca || ""))
-      .map((a) => ({ ...a, key: a.id })),
+      .map((a) => ({ ...a, key: a.id, tipo: "ADICIONAL" })),
   ];
+
+  const totalPlanificadas = actividades.length;
+  const totalFinalizadas = actividades.filter((a) => (marcas[a.id]?.marca || "") === "FINAL").length;
+  const totalParciales = actividades.filter((a) => (marcas[a.id]?.marca || "") === "PARCIAL").length;
+  const porcentajeEjecutado = totalPlanificadas ? Math.round((totalFinalizadas / totalPlanificadas) * 100) : 0;
 
   return (
     <div>
@@ -2131,21 +2137,35 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
         </div>
       </div>
 
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 18 }}>
+        {[
+          [totalPlanificadas, "OT planificadas", C.navy],
+          [totalFinalizadas, "Finalizadas", C.green],
+          [totalParciales, "Parciales", C.amber],
+          [`${porcentajeEjecutado}%`, "Ejecutado vs planificado", porcentajeEjecutado >= 90 ? C.green : porcentajeEjecutado >= 60 ? C.amber : C.red],
+        ].map(([valor, titulo, color]) => (
+          <div key={titulo} style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px" }}>
+            <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 28, color }}>{valor}</div>
+            <div style={{ fontSize: 12, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 800 }}>{titulo}</div>
+          </div>
+        ))}
+      </div>
+
       {loading ? (
         <Vacio texto="Cargando programación semanal de OT..." />
       ) : (
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflowX: "auto", marginBottom: 18 }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1250, fontSize: 13, tableLayout: "fixed" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1180, fontSize: 13, tableLayout: "fixed" }}>
             <colgroup>
+              <col style={{ width: 90 }} />
+              <col style={{ width: 125 }} />
+              <col style={{ width: 280 }} />
+              <col style={{ width: 105 }} />
               <col style={{ width: 95 }} />
-              <col style={{ width: 120 }} />
+              <col style={{ width: 130 }} />
+              <col style={{ width: 105 }} />
+              <col style={{ width: 150 }} />
               <col style={{ width: 300 }} />
-              <col style={{ width: 110 }} />
-              <col style={{ width: 110 }} />
-              <col style={{ width: 145 }} />
-              <col style={{ width: 115 }} />
-              <col style={{ width: 170 }} />
-              <col style={{ width: 240 }} />
             </colgroup>
             <thead>
               <tr>
@@ -2242,10 +2262,10 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
         <Vacio texto="Marca una actividad como Final o Parcial para que aparezca en este listado." />
       ) : (
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 900, fontSize: 13 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1050, fontSize: 13 }}>
             <thead>
               <tr>
-                {["Orden", "Aviso", "Descripción", "Unidad", "Especialidad", "Fecha programada", "Marca", "Nota"].map((h) => (
+                {["Orden", "COD PM/AVISO", "Descripción", "Unidad", "Especialidad", "Fecha programada", "Marca", "Tipo", "Nota"].map((h) => (
                   <th key={h} style={{ background: C.navy, color: C.white, padding: "9px 10px", textAlign: "left", fontFamily: FONT_COND, fontSize: 14, letterSpacing: 0.4, textTransform: "uppercase" }}>
                     {h}
                   </th>
@@ -2262,6 +2282,11 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
                   <td style={{ padding: 9 }}>{row.especialidad || "—"}</td>
                   <td style={{ padding: 9 }}>{row.fecha_programada || "—"}</td>
                   <td style={{ padding: 9, fontWeight: 800, color: row.marca === "FINAL" ? C.green : C.amber }}>{row.marca || "—"}</td>
+                  <td style={{ padding: 9 }}>
+                    <span style={{ display: "inline-block", borderRadius: 999, padding: "3px 8px", fontSize: 11, fontWeight: 800, background: row.tipo === "ADICIONAL" ? C.orangeBg : C.greenBg, color: row.tipo === "ADICIONAL" ? C.orange : C.green }}>
+                      {row.tipo === "ADICIONAL" ? "Adicional" : "Planificada"}
+                    </span>
+                  </td>
                   <td style={{ padding: 9 }}>{row.nota || "—"}</td>
                 </tr>
               ))}
