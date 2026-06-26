@@ -1915,9 +1915,9 @@ function ControlSapPage({ notify }) {
     }
   };
 
-  const prepararCambio = (fila, accion, otFinal) => {
+  const prepararCambio = (fila, accion, otFinalEntrada) => {
     const key = filaKey(fila);
-    const otLimpia = String(otFinal || "").trim();
+    const otLimpia = String(otFinalEntrada || "").trim();
 
     if (accion !== "MANTENER" && !otLimpia) {
       return avisar("Ingresa una OT o usa Mantener sin cambiar.", "err");
@@ -2864,3 +2864,4 @@ function Vacio({ texto }) {
     </div>
   );
 }
+
