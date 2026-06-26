@@ -249,12 +249,11 @@ async function actualizarOtControlSapEnApi({ password, actividadId, otNueva }) {
 }
 
 
-async function aplicarCambiosControlSapEnApi({ password, cambios }) {
+async function aplicarCambiosControlSapEnApi({ cambios }) {
   const response = await fetch(`${PARSER_API}/control-sap/aplicar-cambios`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      password,
       cambios,
     }),
   });
@@ -1963,6 +1962,8 @@ function ControlSapPage({ notify }) {
   const [cargandoAvisos, setCargandoAvisos] = useState(false);
   const [adminResumen, setAdminResumen] = useState(null);
   const [aplicandoCambios, setAplicandoCambios] = useState(false);
+  const [cambiosAplicados, setCambiosAplicados] = useState(false);
+  const [descargandoPmsControl, setDescargandoPmsControl] = useState(false);
 
   const avisar = (msg, kind = "ok") => {
     if (notify) notify(msg, kind);
@@ -1978,6 +1979,7 @@ function ControlSapPage({ notify }) {
     try {
       setValidando(true);
       setCambiosPreparados([]);
+      setCambiosAplicados(false);
       setMostrarOk(false);
       const data = await validarMaestrosControlSapEnApi({ semana, central });
       setResultado(data);
@@ -2127,9 +2129,6 @@ function ControlSapPage({ notify }) {
       return avisar("No hay cambios preparados para aplicar.", "err");
     }
 
-    const clave = adminPassword.trim() || window.prompt("Ingresa la clave admin para aplicar cambios al PMS:");
-    if (!clave) return avisar("No se aplicaron cambios: falta clave admin.", "err");
-
     const confirmar = window.confirm(
       `Se aplicarán ${cambiosPreparados.length} cambio(s) al PMS.\n\n` +
       "Esto actualizará solo OT/Grafo, COD PM/AVISO y Pedido. El motivo/actividad no se modifica.\n\n" +
@@ -2142,7 +2141,6 @@ function ControlSapPage({ notify }) {
       setAplicandoCambios(true);
       avisar("Aplicando cambios al PMS...");
       const data = await aplicarCambiosControlSapEnApi({
-        password: clave,
         cambios: cambiosPreparados,
       });
 
@@ -2152,11 +2150,43 @@ function ControlSapPage({ notify }) {
 
       setCambiosPreparados([]);
       await validarConMaestros();
+      setCambiosAplicados(true);
     } catch (err) {
       console.error("Error aplicando cambios al PMS:", err);
       avisar(`No se pudieron aplicar los cambios: ${err.message || "error desconocido"}`, "err");
     } finally {
       setAplicandoCambios(false);
+    }
+  };
+
+  const descargarPmsUnicoControl = async () => {
+    try {
+      if (!semana) return avisar("No se encontró la semana del PMS.", "err");
+
+      setDescargandoPmsControl(true);
+      avisar("Generando PMS único...");
+
+      const { blob, filename } = await generarPmsUnicoEnApi({ semana, central });
+      const centralNombre = central === "VENTANILLA" ? "VENTANILLA" : "SANTA_ROSA";
+      const nombreFinal =
+        filename ||
+        `PMS_${pms || getNumeroPms(semana)}_PROGRAMA_UNICO_${centralNombre}_${semana}.xlsx`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nombreFinal;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      avisar("PMS único descargado correctamente.", "ok");
+    } catch (err) {
+      console.error("Error descargando PMS único desde Control SAP:", err);
+      avisar(`No se pudo descargar el PMS único: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setDescargandoPmsControl(false);
     }
   };
 
@@ -2228,14 +2258,14 @@ function ControlSapPage({ notify }) {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <div>
               <div style={{ fontWeight: 800, color: C.navy }}>
-                La validación usa los maestros de OTs y Avisos ya cargados en Supabase.
+                La validación se realizará automáticamente con la información del SAP.
               </div>
               <div style={{ fontSize: 13, color: C.slate, marginTop: 4 }}>
-                No requiere clave ni subir archivos. La clave solo se usa en Administración SAP para actualizar maestros.
+                No requiere clave ni subir archivos para validar. La carga de maestros queda reservada para Administración SAP.
               </div>
               {resultado && (
                 <div style={{ fontSize: 12, color: C.slate, marginTop: 6 }}>
-                  Fuente OTs: {resultado.archivo_ordenes || "—"} · Fuente Avisos: {resultado.archivo_avisos || "—"}
+                  Última validación ejecutada correctamente para esta semana.
                 </div>
               )}
             </div>
@@ -2430,7 +2460,24 @@ function ControlSapPage({ notify }) {
               </div>
             )}
 
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 26 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 26 }}>
+              {cambiosAplicados && (
+                <button
+                  onClick={descargarPmsUnicoControl}
+                  disabled={descargandoPmsControl}
+                  style={{
+                    background: descargandoPmsControl ? C.slate : C.green,
+                    color: C.white,
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "12px 18px",
+                    fontWeight: 900,
+                  }}
+                >
+                  {descargandoPmsControl ? "Generando PMS..." : "Descargar PMS único"}
+                </button>
+              )}
+
               <button
                 onClick={aplicarCambiosEstructura}
                 disabled={cambiosPreparados.length === 0 || aplicandoCambios}
@@ -2453,7 +2500,7 @@ function ControlSapPage({ notify }) {
         <h3 style={sectionTitle}>Administración SAP</h3>
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16 }}>
           <p style={{ margin: "0 0 12px", color: C.slate, fontSize: 13 }}>
-            Solo administrador: actualiza los maestros semanales de OTs y Avisos. Estos archivos se guardan en Supabase y luego la validación se ejecuta automáticamente.
+            Solo administrador: actualiza los maestros semanales de OTs y Avisos. Luego la validación se ejecuta automáticamente con esa información.
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 260px) minmax(220px, 1fr) auto minmax(220px, 1fr) auto", gap: 12, alignItems: "end" }}>
             <div>
