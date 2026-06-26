@@ -1875,11 +1875,11 @@ async function guardarControlOtRow(payload, existenteId = null) {
 function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico, notify }) {
   const [filtroCentral, setFiltroCentral] = useState(centralInicial || "SANTA ROSA");
   const [actividades, setActividades] = useState([]);
-  const [controles, setControles] = useState([]);
   const [sapOrdenes, setSapOrdenes] = useState({});
   const [busqueda, setBusqueda] = useState("");
   const [loading, setLoading] = useState(true);
-  const [savingId, setSavingId] = useState(null);
+  const [marcas, setMarcas] = useState({});
+  const [adicionales, setAdicionales] = useState([]);
 
   const centralActualLabel = CENTRALES.find((c) => c.value === filtroCentral)?.label || "C. T. Santa Rosa";
 
@@ -1926,18 +1926,8 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
         }
       }
 
-      const { data: ctrlRows, error: ctrlError } = await supabase
-        .from("pms_control_ot_semanal")
-        .select("*")
-        .eq("semana", wk.id)
-        .eq("central", filtroCentral)
-        .order("fecha_registro", { ascending: true });
-
-      if (ctrlError) throw ctrlError;
-
       setActividades(filtradas);
       setSapOrdenes(mapaSap);
-      setControles(ctrlRows || []);
     } catch (err) {
       console.error("Error cargando programación semanal OT:", err);
       notify?.(`No se pudo cargar la programación OT: ${err.message || "error desconocido"}`, "err");
@@ -1949,13 +1939,6 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
   useEffect(() => {
     cargarControlOt();
   }, [cargarControlOt]);
-
-  const controlPorActividad = controles.reduce((acc, row) => {
-    if (row.actividad_id) acc[row.actividad_id] = row;
-    return acc;
-  }, {});
-
-  const adicionales = controles.filter((row) => row.es_adicional);
 
   const visible = actividades.filter((a) => {
     const q = busqueda.trim().toUpperCase();
@@ -1975,100 +1958,68 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
       .includes(q);
   });
 
-  const actualizarCampoBase = async (actividad, patch) => {
-    const actual = controlPorActividad[actividad.id];
-    const sap = sapOrdenes[actividad.orden_control] || {};
-    const payload = {
-      semana: wk.id,
-      central: filtroCentral,
-      actividad_id: actividad.id,
-      orden: actividad.orden_control,
-      descripcion: actividad.descripcion_control,
-      aviso: actividad.aviso_control,
-      unidad: actividad.unidad_control,
-      especialidad: actividad.especialidad_control,
-      fecha_programada: actividad.fecha_programada_control,
-      situacion: sap.estado_control || sap.estado_orden || "",
-      es_adicional: false,
-      marca: actual?.marca || "",
-      nota: actual?.nota || "",
-      ...patch,
-    };
-
-    try {
-      setSavingId(actividad.id);
-      const guardado = await guardarControlOtRow(payload, actual?.id || null);
-      setControles((prev) => {
-        const sinAnterior = prev.filter((r) => r.id !== guardado.id && r.actividad_id !== actividad.id);
-        return [...sinAnterior, guardado];
-      });
-      notify?.("Control OT actualizado.");
-    } catch (err) {
-      console.error("Error guardando control OT:", err);
-      notify?.(`No se pudo guardar el control OT: ${err.message || "error desconocido"}`, "err");
-    } finally {
-      setSavingId(null);
-    }
+  const setMarcaBase = (actividad, marcaNueva) => {
+    setMarcas((prev) => ({
+      ...prev,
+      [actividad.id]: {
+        ...(prev[actividad.id] || {}),
+        tipo: "BASE",
+        actividad_id: actividad.id,
+        orden: actividad.orden_control,
+        aviso: actividad.aviso_control,
+        descripcion: actividad.descripcion_control,
+        unidad: actividad.unidad_control,
+        especialidad: actividad.especialidad_control,
+        fecha_programada: actividad.fecha_programada_control,
+        situacion: sapOrdenes[actividad.orden_control]?.estado_control || sapOrdenes[actividad.orden_control]?.estado_orden || "—",
+        marca: marcaNueva,
+      },
+    }));
   };
 
-  const agregarAdicional = async () => {
-    try {
-      const payload = {
-        semana: wk.id,
-        central: filtroCentral,
-        actividad_id: null,
+  const setNotaBase = (actividad, notaNueva) => {
+    setMarcas((prev) => ({
+      ...prev,
+      [actividad.id]: {
+        ...(prev[actividad.id] || {}),
+        tipo: "BASE",
+        actividad_id: actividad.id,
+        orden: actividad.orden_control,
+        aviso: actividad.aviso_control,
+        descripcion: actividad.descripcion_control,
+        unidad: actividad.unidad_control,
+        especialidad: actividad.especialidad_control,
+        fecha_programada: actividad.fecha_programada_control,
+        situacion: sapOrdenes[actividad.orden_control]?.estado_control || sapOrdenes[actividad.orden_control]?.estado_orden || "—",
+        nota: notaNueva,
+      },
+    }));
+  };
+
+  const agregarAdicional = () => {
+    setAdicionales((prev) => [
+      ...prev,
+      {
+        id: `adicional-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         orden: "",
         aviso: "",
         descripcion: "",
         unidad: "",
         especialidad: "",
         fecha_programada: "",
-        situacion: "",
+        situacion: "—",
         marca: "",
         nota: "",
-        es_adicional: true,
-      };
-
-      const guardado = await guardarControlOtRow(payload);
-      setControles((prev) => [...prev, guardado]);
-      notify?.("Fila adicional agregada.");
-    } catch (err) {
-      console.error("Error agregando fila adicional:", err);
-      notify?.(`No se pudo agregar la fila: ${err.message || "error desconocido"}`, "err");
-    }
+      },
+    ]);
   };
 
-  const actualizarAdicional = async (row, patch) => {
-    const payload = { ...patch };
-
-    try {
-      setSavingId(row.id);
-      const guardado = await guardarControlOtRow(payload, row.id);
-      setControles((prev) => prev.map((r) => (r.id === row.id ? guardado : r)));
-    } catch (err) {
-      console.error("Error actualizando adicional:", err);
-      notify?.(`No se pudo guardar la fila adicional: ${err.message || "error desconocido"}`, "err");
-    } finally {
-      setSavingId(null);
-    }
+  const actualizarAdicional = (id, patch) => {
+    setAdicionales((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   };
 
-  const eliminarAdicional = async (row) => {
-    if (!window.confirm("¿Eliminar esta actividad adicional?")) return;
-
-    try {
-      const { error } = await supabase
-        .from("pms_control_ot_semanal")
-        .delete()
-        .eq("id", row.id);
-
-      if (error) throw error;
-      setControles((prev) => prev.filter((r) => r.id !== row.id));
-      notify?.("Actividad adicional eliminada.");
-    } catch (err) {
-      console.error("Error eliminando adicional:", err);
-      notify?.(`No se pudo eliminar: ${err.message || "error desconocido"}`, "err");
-    }
+  const eliminarAdicional = (id) => {
+    setAdicionales((prev) => prev.filter((row) => row.id !== id));
   };
 
   const marcaBtn = (label, value, current, onClick) => (
@@ -2082,6 +2033,7 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
         fontWeight: 800,
         borderRadius: 7,
         fontSize: 12,
+        whiteSpace: "nowrap",
       }}
     >
       {label}
@@ -2098,6 +2050,29 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
     color: C.navy,
     background: C.white,
   };
+
+  const filasParaNotificar = [
+    ...actividades
+      .map((a) => {
+        const ctrl = marcas[a.id] || {};
+        if (!["FINAL", "PARCIAL"].includes(ctrl.marca || "")) return null;
+        return {
+          key: a.id,
+          orden: a.orden_control,
+          aviso: a.aviso_control,
+          descripcion: a.descripcion_control,
+          unidad: a.unidad_control,
+          especialidad: a.especialidad_control,
+          fecha_programada: a.fecha_programada_control,
+          marca: ctrl.marca,
+          nota: ctrl.nota || "",
+        };
+      })
+      .filter(Boolean),
+    ...adicionales
+      .filter((a) => ["FINAL", "PARCIAL"].includes(a.marca || ""))
+      .map((a) => ({ ...a, key: a.id })),
+  ];
 
   return (
     <div>
@@ -2127,80 +2102,32 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
         ))}
       </div>
 
-      <div
-        style={{
-          background: C.white,
-          border: `1px solid ${C.line}`,
-          borderRadius: 10,
-          padding: "14px 16px",
-          marginBottom: 18,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
+      <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: "14px 16px", marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.6 }}>
             Control de cumplimiento · {centralActualLabel}
           </div>
-          <div style={{ fontSize: 13, color: C.slate, marginTop: 3 }}>
-            Registra avance real del PMS: final, parcial, pendiente o actividades adicionales.
+          <div style={{ fontSize: 13, color: C.slate, marginTop: 2 }}>
+            Marca qué OTs quedaron listas para notificar. Esto solo arma el listado; no notifica ni modifica SAP.
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            onClick={cargarControlOt}
-            style={{
-              background: C.navy,
-              color: C.white,
-              border: "none",
-              borderRadius: 8,
-              padding: "10px 14px",
-              fontSize: 13,
-              fontWeight: 800,
-            }}
-          >
+          <button onClick={cargarControlOt} style={{ background: C.navy, color: C.white, border: "none", borderRadius: 8, padding: "11px 16px", fontSize: 14, fontWeight: 800 }}>
             Actualizar tabla
           </button>
-
-          <button
-            onClick={() => onGenerarPmsUnico?.({ semana: wk.id, central: filtroCentral })}
-            style={{
-              background: C.green,
-              color: C.white,
-              border: "none",
-              borderRadius: 8,
-              padding: "10px 14px",
-              fontSize: 13,
-              fontWeight: 800,
-            }}
-          >
+          <button onClick={() => onGenerarPmsUnico?.({ semana: wk.id, central: filtroCentral })} style={{ background: C.green, color: C.white, border: "none", borderRadius: 8, padding: "11px 16px", fontSize: 14, fontWeight: 800 }}>
             Descargar PMS único
           </button>
         </div>
       </div>
 
-      <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 14 }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar orden, descripción, unidad, especialidad..."
-            style={{
-              flex: "1 1 260px",
-              border: `1px solid ${C.line}`,
-              borderRadius: 7,
-              padding: "10px 12px",
-              fontSize: 14,
-            }}
-          />
-
-          <span style={{ fontSize: 13, color: C.slate, fontWeight: 700 }}>
-            {visible.length} OT visibles · {adicionales.length} adicionales
-          </span>
+      <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar orden, aviso, descripción, unidad, especialidad..." style={{ ...inputCell, flex: "1 1 420px" }} />
+          <div style={{ fontWeight: 800, color: C.slate }}>
+            {visible.length} OT visibles · {adicionales.length} adicionales · {filasParaNotificar.length} para notificar
+          </div>
         </div>
       </div>
 
@@ -2208,44 +2135,40 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
         <Vacio texto="Cargando programación semanal de OT..." />
       ) : (
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflowX: "auto", marginBottom: 18 }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1320, fontSize: 13 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1250, fontSize: 13, tableLayout: "fixed" }}>
+            <colgroup>
+              <col style={{ width: 95 }} />
+              <col style={{ width: 120 }} />
+              <col style={{ width: 300 }} />
+              <col style={{ width: 110 }} />
+              <col style={{ width: 110 }} />
+              <col style={{ width: 145 }} />
+              <col style={{ width: 115 }} />
+              <col style={{ width: 170 }} />
+              <col style={{ width: 240 }} />
+            </colgroup>
             <thead>
               <tr>
-                {["Orden", "Aviso", "Descripción", "Unidad", "Especialidad", "Fecha programada", "Situación", "Mi marca", "Nota"].map((h) => (
-                  <th
-                    key={h}
-                    style={{
-                      background: C.navy,
-                      color: C.white,
-                      padding: "9px 10px",
-                      textAlign: "left",
-                      fontFamily: FONT_COND,
-                      fontSize: 14,
-                      letterSpacing: 0.4,
-                      textTransform: "uppercase",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+                {["Orden", "Aviso", "Descripción", "Unidad", "Especialidad", "Fecha programada", "Situación", "Mi marca", "Nota / avance real del trabajo"].map((h) => (
+                  <th key={h} style={{ background: C.navy, color: C.white, padding: "9px 10px", textAlign: "left", fontFamily: FONT_COND, fontSize: 14, letterSpacing: 0.4, textTransform: "uppercase", whiteSpace: "nowrap" }}>
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-
             <tbody>
               {visible.map((a) => {
-                const ctrl = controlPorActividad[a.id] || {};
+                const ctrl = marcas[a.id] || {};
                 const sap = sapOrdenes[a.orden_control] || {};
                 const situacion = ctrl.situacion || sap.estado_control || sap.estado_orden || "—";
                 const marca = ctrl.marca || "";
                 const nota = ctrl.nota || "";
-                const saving = savingId === a.id;
 
                 return (
-                  <tr key={a.id} style={{ borderTop: `1px solid ${C.line}`, opacity: saving ? 0.65 : 1 }}>
+                  <tr key={a.id} style={{ borderTop: `1px solid ${C.line}` }}>
                     <td style={{ padding: 10, fontWeight: 800, verticalAlign: "top" }}>{a.orden_control}</td>
                     <td style={{ padding: 10, fontWeight: 800, verticalAlign: "top" }}>{a.aviso_control || "—"}</td>
-                    <td style={{ padding: 10, minWidth: 260, verticalAlign: "top" }}>
+                    <td style={{ padding: 10, verticalAlign: "top" }}>
                       {a.descripcion_control || "—"}
                       {a.proveedor && <div style={{ color: C.slate, fontSize: 12, marginTop: 3 }}>{a.proveedor}</div>}
                     </td>
@@ -2253,35 +2176,19 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
                     <td style={{ padding: 10, verticalAlign: "top" }}>{a.especialidad_control || "—"}</td>
                     <td style={{ padding: 10, verticalAlign: "top" }}>{a.fecha_programada_control || "—"}</td>
                     <td style={{ padding: 10, verticalAlign: "top" }}>
-                      <span
-                        style={{
-                          display: "inline-block",
-                          padding: "4px 8px",
-                          borderRadius: 999,
-                          background: /CERR|MECE/i.test(String(situacion)) ? C.redBg : C.greenBg,
-                          color: /CERR|MECE/i.test(String(situacion)) ? C.red : C.green,
-                          fontWeight: 800,
-                          fontSize: 12,
-                        }}
-                      >
+                      <span style={{ display: "inline-block", padding: "4px 8px", borderRadius: 999, background: /CERR|MECE/i.test(String(situacion)) ? C.redBg : C.greenBg, color: /CERR|MECE/i.test(String(situacion)) ? C.red : C.green, fontWeight: 800, fontSize: 12 }}>
                         {situacion}
                       </span>
                     </td>
-                    <td style={{ padding: 10, minWidth: 185, verticalAlign: "top" }}>
+                    <td style={{ padding: 10, verticalAlign: "top" }}>
                       <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                        {marcaBtn("Final", "FINAL", marca, () => actualizarCampoBase(a, { marca: "FINAL" }))}
-                        {marcaBtn("Parc", "PARCIAL", marca, () => actualizarCampoBase(a, { marca: "PARCIAL" }))}
-                        {marcaBtn("—", "", marca, () => actualizarCampoBase(a, { marca: "" }))}
+                        {marcaBtn("Final", "FINAL", marca, () => setMarcaBase(a, "FINAL"))}
+                        {marcaBtn("Parc", "PARCIAL", marca, () => setMarcaBase(a, "PARCIAL"))}
+                        {marcaBtn("—", "", marca, () => setMarcaBase(a, ""))}
                       </div>
                     </td>
-                    <td style={{ padding: 10, minWidth: 260, verticalAlign: "top" }}>
-                      <textarea
-                        defaultValue={nota}
-                        placeholder="Describe lo ejecutado, pendiente o interferencias..."
-                        onBlur={(e) => actualizarCampoBase(a, { nota: e.target.value })}
-                        rows={2}
-                        style={{ ...inputCell, resize: "vertical" }}
-                      />
+                    <td style={{ padding: 10, verticalAlign: "top" }}>
+                      <textarea value={nota} placeholder="Describe lo ejecutado..." onChange={(e) => setNotaBase(a, e.target.value)} rows={2} style={{ ...inputCell, resize: "vertical" }} />
                     </td>
                   </tr>
                 );
@@ -2289,90 +2196,23 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
 
               {adicionales.map((row) => (
                 <tr key={row.id} style={{ borderTop: `1px solid ${C.line}`, background: "#FFFCF8" }}>
+                  <td style={{ padding: 10, verticalAlign: "top" }}><input value={row.orden || ""} onChange={(e) => actualizarAdicional(row.id, { orden: e.target.value })} style={inputCell} placeholder="OT/Aviso" /></td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}><input value={row.aviso || ""} onChange={(e) => actualizarAdicional(row.id, { aviso: e.target.value })} style={inputCell} placeholder="Aviso/COD PM" /></td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}><textarea value={row.descripcion || ""} onChange={(e) => actualizarAdicional(row.id, { descripcion: e.target.value })} rows={2} style={{ ...inputCell, resize: "vertical" }} placeholder="Actividad adicional" /></td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}><input value={row.unidad || ""} onChange={(e) => actualizarAdicional(row.id, { unidad: e.target.value })} style={inputCell} placeholder="TG7" /></td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}><input value={row.especialidad || ""} onChange={(e) => actualizarAdicional(row.id, { especialidad: e.target.value })} style={inputCell} placeholder="ELE/MEC/I&C" /></td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}><input value={row.fecha_programada || ""} onChange={(e) => actualizarAdicional(row.id, { fecha_programada: e.target.value })} style={inputCell} placeholder="dd/mm/aa" /></td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}><input value={row.situacion || ""} onChange={(e) => actualizarAdicional(row.id, { situacion: e.target.value })} style={inputCell} placeholder="Situación" /></td>
                   <td style={{ padding: 10, verticalAlign: "top" }}>
-                    <input
-                      defaultValue={row.orden || ""}
-                      onBlur={(e) => actualizarAdicional(row, { orden: e.target.value })}
-                      style={inputCell}
-                      placeholder="OT/Aviso"
-                    />
-                  </td>
-                  <td style={{ padding: 10, verticalAlign: "top" }}>
-                    <input
-                      defaultValue={row.aviso || ""}
-                      onBlur={(e) => actualizarAdicional(row, { aviso: e.target.value })}
-                      style={inputCell}
-                      placeholder="Aviso/COD PM"
-                    />
-                  </td>
-                  <td style={{ padding: 10, verticalAlign: "top" }}>
-                    <textarea
-                      defaultValue={row.descripcion || ""}
-                      onBlur={(e) => actualizarAdicional(row, { descripcion: e.target.value })}
-                      rows={2}
-                      style={{ ...inputCell, resize: "vertical" }}
-                      placeholder="Actividad adicional"
-                    />
-                  </td>
-                  <td style={{ padding: 10, verticalAlign: "top" }}>
-                    <input
-                      defaultValue={row.unidad || ""}
-                      onBlur={(e) => actualizarAdicional(row, { unidad: e.target.value })}
-                      style={inputCell}
-                      placeholder="TG7"
-                    />
-                  </td>
-                  <td style={{ padding: 10, verticalAlign: "top" }}>
-                    <input
-                      defaultValue={row.especialidad || ""}
-                      onBlur={(e) => actualizarAdicional(row, { especialidad: e.target.value })}
-                      style={inputCell}
-                      placeholder="ELE/MEC/I&C"
-                    />
-                  </td>
-                  <td style={{ padding: 10, verticalAlign: "top" }}>
-                    <input
-                      defaultValue={row.fecha_programada || ""}
-                      onBlur={(e) => actualizarAdicional(row, { fecha_programada: e.target.value })}
-                      style={inputCell}
-                      placeholder="dd/mm/aa"
-                    />
-                  </td>
-                  <td style={{ padding: 10, verticalAlign: "top" }}>
-                    <input
-                      defaultValue={row.situacion || ""}
-                      onBlur={(e) => actualizarAdicional(row, { situacion: e.target.value })}
-                      style={inputCell}
-                      placeholder="Abierta/Cerrada"
-                    />
-                  </td>
-                  <td style={{ padding: 10, minWidth: 185, verticalAlign: "top" }}>
                     <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                      {marcaBtn("Final", "FINAL", row.marca || "", () => actualizarAdicional(row, { marca: "FINAL" }))}
-                      {marcaBtn("Parc", "PARCIAL", row.marca || "", () => actualizarAdicional(row, { marca: "PARCIAL" }))}
-                      {marcaBtn("—", "", row.marca || "", () => actualizarAdicional(row, { marca: "" }))}
+                      {marcaBtn("Final", "FINAL", row.marca || "", () => actualizarAdicional(row.id, { marca: "FINAL" }))}
+                      {marcaBtn("Parc", "PARCIAL", row.marca || "", () => actualizarAdicional(row.id, { marca: "PARCIAL" }))}
+                      {marcaBtn("—", "", row.marca || "", () => actualizarAdicional(row.id, { marca: "" }))}
                     </div>
                   </td>
-                  <td style={{ padding: 10, minWidth: 300, verticalAlign: "top" }}>
-                    <textarea
-                      defaultValue={row.nota || ""}
-                      onBlur={(e) => actualizarAdicional(row, { nota: e.target.value })}
-                      rows={2}
-                      style={{ ...inputCell, resize: "vertical" }}
-                      placeholder="Nota de ejecución"
-                    />
-                    <button
-                      onClick={() => eliminarAdicional(row)}
-                      style={{
-                        marginTop: 8,
-                        background: "transparent",
-                        color: C.red,
-                        border: `1px solid ${C.red}`,
-                        borderRadius: 6,
-                        padding: "6px 10px",
-                        fontWeight: 800,
-                      }}
-                    >
+                  <td style={{ padding: 10, verticalAlign: "top" }}>
+                    <textarea value={row.nota || ""} onChange={(e) => actualizarAdicional(row.id, { nota: e.target.value })} rows={2} style={{ ...inputCell, resize: "vertical" }} placeholder="Nota de ejecución" />
+                    <button onClick={() => eliminarAdicional(row.id)} style={{ marginTop: 8, background: "transparent", color: C.red, border: `1px solid ${C.red}`, borderRadius: 6, padding: "6px 10px", fontWeight: 800 }}>
                       Eliminar fila
                     </button>
                   </td>
@@ -2391,27 +2231,47 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-        <button
-          onClick={agregarAdicional}
-          style={{
-            background: C.orange,
-            color: C.white,
-            border: "none",
-            borderRadius: 8,
-            padding: "11px 16px",
-            fontSize: 14,
-            fontWeight: 800,
-          }}
-        >
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", marginBottom: 22 }}>
+        <button onClick={agregarAdicional} style={{ background: C.orange, color: C.white, border: "none", borderRadius: 8, padding: "11px 16px", fontSize: 14, fontWeight: 800 }}>
           + Agregar actividad adicional
         </button>
       </div>
+
+      <h3 style={sectionTitle}>OTs para notificar</h3>
+      {filasParaNotificar.length === 0 ? (
+        <Vacio texto="Marca una actividad como Final o Parcial para que aparezca en este listado." />
+      ) : (
+        <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 900, fontSize: 13 }}>
+            <thead>
+              <tr>
+                {["Orden", "Aviso", "Descripción", "Unidad", "Especialidad", "Fecha programada", "Marca", "Nota"].map((h) => (
+                  <th key={h} style={{ background: C.navy, color: C.white, padding: "9px 10px", textAlign: "left", fontFamily: FONT_COND, fontSize: 14, letterSpacing: 0.4, textTransform: "uppercase" }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filasParaNotificar.map((row) => (
+                <tr key={row.key} style={{ borderTop: `1px solid ${C.line}` }}>
+                  <td style={{ padding: 9, fontWeight: 800 }}>{row.orden || "—"}</td>
+                  <td style={{ padding: 9, fontWeight: 800 }}>{row.aviso || "—"}</td>
+                  <td style={{ padding: 9 }}>{row.descripcion || "—"}</td>
+                  <td style={{ padding: 9 }}>{row.unidad || "—"}</td>
+                  <td style={{ padding: 9 }}>{row.especialidad || "—"}</td>
+                  <td style={{ padding: 9 }}>{row.fecha_programada || "—"}</td>
+                  <td style={{ padding: 9, fontWeight: 800, color: row.marca === "FINAL" ? C.green : C.amber }}>{row.marca || "—"}</td>
+                  <td style={{ padding: 9 }}>{row.nota || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
-
-
 
 function ObservacionesBox({ observaciones, loading, total }) {
   if (loading) {
@@ -3113,37 +2973,35 @@ function ControlSapPage({ notify, semanaProp, centralProp, pmsProp, rangoProp, o
             )}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 26 }}>
-              {cambiosAplicados && (
-                <>
-                  <button
-                    onClick={() => onVerProgramacionSemanal?.()}
-                    style={{
-                      background: C.navy,
-                      color: C.white,
-                      border: "none",
-                      borderRadius: 8,
-                      padding: "12px 18px",
-                      fontWeight: 900,
-                    }}
-                  >
-                    Ver programación semanal
-                  </button>
+              <button
+                onClick={() => onVerProgramacionSemanal?.()}
+                style={{
+                  background: C.navy,
+                  color: C.white,
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "12px 18px",
+                  fontWeight: 900,
+                }}
+              >
+                Ver programación semanal
+              </button>
 
-                  <button
-                    onClick={descargarPmsUnicoControl}
-                    disabled={descargandoPmsControl}
-                    style={{
-                      background: descargandoPmsControl ? C.slate : C.green,
-                      color: C.white,
-                      border: "none",
-                      borderRadius: 8,
-                      padding: "12px 18px",
-                      fontWeight: 900,
-                    }}
-                  >
-                    {descargandoPmsControl ? "Generando PMS..." : "Descargar PMS único"}
-                  </button>
-                </>
+              {cambiosAplicados && (
+                <button
+                  onClick={descargarPmsUnicoControl}
+                  disabled={descargandoPmsControl}
+                  style={{
+                    background: descargandoPmsControl ? C.slate : C.green,
+                    color: C.white,
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "12px 18px",
+                    fontWeight: 900,
+                  }}
+                >
+                  {descargandoPmsControl ? "Generando PMS..." : "Descargar PMS único"}
+                </button>
               )}
 
               <button
