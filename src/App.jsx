@@ -2864,4 +2864,3 @@ function Vacio({ texto }) {
     </div>
   );
 }
-
