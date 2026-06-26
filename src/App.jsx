@@ -1929,20 +1929,30 @@ function ControlSapPage({ notify }) {
       (/^(3500|4500)\d+/i.test(String(fila.numero_pms || "")) ? fila.numero_pms : "") ||
       "";
 
-    const esAvisoSinOt = String(fila.estado || "").toUpperCase() === "AVISO_SIN_OT";
+    const estadoFila = String(fila.estado || "").toUpperCase();
+    const esAvisoSinOt = estadoFila === "AVISO_SIN_OT";
+    const esAvisoNoOperativo = estadoFila === "AVISO_NO_OPERATIVO";
 
-    const codPmSugerido =
-      fila.cod_pm_sugerido ||
-      fila.cod_pm_sap ||
-      fila.aviso_sap ||
-      fila.aviso_pms ||
-      fila.plan_pm_sap ||
-      "";
+    const codPmSugerido = esAvisoNoOperativo
+      ? ""
+      : (
+        fila.cod_pm_sugerido ||
+        fila.cod_pm_sap ||
+        fila.aviso_sap ||
+        fila.aviso_pms ||
+        fila.plan_pm_sap ||
+        ""
+      );
 
-    const accionFinal = esAvisoSinOt && accion === "MANTENER" ? "AVISO SIN OT" : accion;
+    const accionFinal =
+      esAvisoNoOperativo && accion === "MANTENER"
+        ? "AVISO NO OPERATIVO"
+        : esAvisoSinOt && accion === "MANTENER"
+          ? "AVISO SIN OT"
+          : accion;
 
     const otFinal =
-      esAvisoSinOt && accion === "MANTENER"
+      (esAvisoSinOt || esAvisoNoOperativo) && accion === "MANTENER"
         ? ""
         : accion === "MANTENER"
           ? (fila.numero_pms || "")
@@ -1966,12 +1976,14 @@ function ControlSapPage({ notify }) {
       descripcion_final:
         accion === "SUGERIDA"
           ? "Se corrige OT/Pedido según sugerencia SAP. El motivo PMS no se modifica."
-          : esAvisoSinOt && accion === "MANTENER"
-            ? "Se mantiene como Aviso/COD PM. No se coloca OT porque SAP no muestra OT asociada."
-            : accion === "MANTENER"
-              ? "Se mantiene el valor informado en el PMS."
-              : "OT ingresada manualmente por el supervisor. El motivo PMS no se modifica.",
-      estado: accionFinal === "MANTENER" || accionFinal === "AVISO SIN OT" ? "SIN CAMBIO" : "PENDIENTE DE APLICAR",
+          : esAvisoNoOperativo && accion === "MANTENER"
+            ? "El aviso aparece cerrado/no operativo en SAP. No se propone como COD PM/AVISO."
+            : esAvisoSinOt && accion === "MANTENER"
+              ? "Se mantiene como Aviso/COD PM. No se coloca OT porque SAP no muestra OT asociada."
+              : accion === "MANTENER"
+                ? "Se mantiene el valor informado en el PMS."
+                : "OT ingresada manualmente por el supervisor. El motivo PMS no se modifica.",
+      estado: ["MANTENER", "AVISO SIN OT", "AVISO NO OPERATIVO"].includes(accionFinal) ? "SIN CAMBIO" : "PENDIENTE DE APLICAR",
     };
 
     setCambiosPreparados((prev) => {
