@@ -249,6 +249,26 @@ async function actualizarOtControlSapEnApi({ password, actividadId, otNueva }) {
 }
 
 
+async function aplicarCambiosControlSapEnApi({ password, cambios }) {
+  const response = await fetch(`${PARSER_API}/control-sap/aplicar-cambios`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      password,
+      cambios,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || `Error ${response.status} aplicando cambios al PMS`);
+  }
+
+  return data;
+}
+
+
 // Storage local solo para configuración de empresas y acta.
 // Los PMS ya se guardan en Supabase.
 const storage = {
@@ -1942,6 +1962,7 @@ function ControlSapPage({ notify }) {
   const [cargandoOts, setCargandoOts] = useState(false);
   const [cargandoAvisos, setCargandoAvisos] = useState(false);
   const [adminResumen, setAdminResumen] = useState(null);
+  const [aplicandoCambios, setAplicandoCambios] = useState(false);
 
   const avisar = (msg, kind = "ok") => {
     if (notify) notify(msg, kind);
@@ -2101,8 +2122,42 @@ function ControlSapPage({ notify }) {
     setCambiosPreparados((prev) => prev.filter((x) => x.key !== key));
   };
 
-  const aplicarCambiosEstructura = () => {
-    avisar("Botón preparado. La aplicación real al PMS se conectará en el siguiente paso.", "ok");
+  const aplicarCambiosEstructura = async () => {
+    if (cambiosPreparados.length === 0) {
+      return avisar("No hay cambios preparados para aplicar.", "err");
+    }
+
+    const clave = adminPassword.trim() || window.prompt("Ingresa la clave admin para aplicar cambios al PMS:");
+    if (!clave) return avisar("No se aplicaron cambios: falta clave admin.", "err");
+
+    const confirmar = window.confirm(
+      `Se aplicarán ${cambiosPreparados.length} cambio(s) al PMS.\n\n` +
+      "Esto actualizará solo OT/Grafo, COD PM/AVISO y Pedido. El motivo/actividad no se modifica.\n\n" +
+      "¿Continuar?"
+    );
+
+    if (!confirmar) return;
+
+    try {
+      setAplicandoCambios(true);
+      avisar("Aplicando cambios al PMS...");
+      const data = await aplicarCambiosControlSapEnApi({
+        password: clave,
+        cambios: cambiosPreparados,
+      });
+
+      const aplicados = data?.aplicados ?? cambiosPreparados.length;
+      const omitidos = data?.omitidos ?? 0;
+      avisar(`Cambios aplicados: ${aplicados}. Omitidos: ${omitidos}. Revalidando...`, "ok");
+
+      setCambiosPreparados([]);
+      await validarConMaestros();
+    } catch (err) {
+      console.error("Error aplicando cambios al PMS:", err);
+      avisar(`No se pudieron aplicar los cambios: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setAplicandoCambios(false);
+    }
   };
 
   const resumen = resultado?.resumen || {};
@@ -2378,7 +2433,7 @@ function ControlSapPage({ notify }) {
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 26 }}>
               <button
                 onClick={aplicarCambiosEstructura}
-                disabled={cambiosPreparados.length === 0}
+                disabled={cambiosPreparados.length === 0 || aplicandoCambios}
                 style={{
                   background: cambiosPreparados.length === 0 ? C.slate : C.orange,
                   color: C.white,
@@ -2389,7 +2444,7 @@ function ControlSapPage({ notify }) {
                   opacity: cambiosPreparados.length === 0 ? 0.6 : 1,
                 }}
               >
-                Aplicar cambios a PMS
+                {aplicandoCambios ? "Aplicando cambios..." : "Aplicar cambios a PMS"}
               </button>
             </div>
           </>
