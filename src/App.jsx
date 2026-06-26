@@ -173,6 +173,61 @@ async function validarOtsControlSapEnApi({ password, semana, central, ordenesFil
   return data;
 }
 
+
+async function validarMaestrosControlSapEnApi({ semana, central }) {
+  const response = await fetch(`${PARSER_API}/control-sap/validar-maestros`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ semana, central }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || `Error ${response.status} validando maestros SAP`);
+  }
+
+  return data;
+}
+
+async function cargarMaestroOtsControlSapEnApi({ password, file }) {
+  const formData = new FormData();
+  formData.append("password", password);
+  formData.append("file", file);
+
+  const response = await fetch(`${PARSER_API}/control-sap/cargar-maestro-ots`, {
+    method: "POST",
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || `Error ${response.status} cargando maestro de OTs`);
+  }
+
+  return data;
+}
+
+async function cargarMaestroAvisosControlSapEnApi({ password, file }) {
+  const formData = new FormData();
+  formData.append("password", password);
+  formData.append("file", file);
+
+  const response = await fetch(`${PARSER_API}/control-sap/cargar-maestro-avisos`, {
+    method: "POST",
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || `Error ${response.status} cargando maestro de avisos`);
+  }
+
+  return data;
+}
+
 async function actualizarOtControlSapEnApi({ password, actividadId, otNueva }) {
   const response = await fetch(`${PARSER_API}/control-sap/actualizar-ot`, {
     method: "POST",
@@ -1874,15 +1929,19 @@ function ControlSapPage({ notify }) {
   const pms = params.get("pms") || "";
   const rango = params.get("rango") || semana;
 
-  const [password, setPassword] = useState("");
-  const [ordenesFile, setOrdenesFile] = useState(null);
-  const [avisosFile, setAvisosFile] = useState(null);
   const [validando, setValidando] = useState(false);
   const [resultado, setResultado] = useState(null);
   const [manualPorFila, setManualPorFila] = useState({});
   const [cambiosPreparados, setCambiosPreparados] = useState([]);
   const [mostrarOk, setMostrarOk] = useState(false);
   const [localToast, setLocalToast] = useState(null);
+
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminOrdenesFile, setAdminOrdenesFile] = useState(null);
+  const [adminAvisosFile, setAdminAvisosFile] = useState(null);
+  const [cargandoOts, setCargandoOts] = useState(false);
+  const [cargandoAvisos, setCargandoAvisos] = useState(false);
+  const [adminResumen, setAdminResumen] = useState(null);
 
   const avisar = (msg, kind = "ok") => {
     if (notify) notify(msg, kind);
@@ -1893,25 +1952,64 @@ function ControlSapPage({ notify }) {
   const filaKey = (fila, idx = 0) =>
     String(fila?.actividad_id || `${fila?.empresa || ""}-${fila?.fila_excel || ""}-${fila?.numero_pms || ""}-${idx}`);
 
-  const validar = async () => {
-    if (!password.trim()) return avisar("Ingresa la clave de Control SAP.", "err");
-    if (!ordenesFile) return avisar("Selecciona el Excel SAP de Órdenes de mantenimiento.", "err");
-    if (ordenesFile.size > MAX_SAP_FILE) return avisar(`El archivo de órdenes supera ${fmtKB(MAX_SAP_FILE)}.`, "err");
-    if (avisosFile && avisosFile.size > MAX_SAP_FILE) return avisar(`El archivo de avisos supera ${fmtKB(MAX_SAP_FILE)}.`, "err");
-
+  const validarConMaestros = useCallback(async () => {
+    if (!semana) return;
     try {
       setValidando(true);
       setCambiosPreparados([]);
       setMostrarOk(false);
-      avisar(avisosFile ? "Validando OTs y avisos contra SAP..." : "Validando OTs contra SAP...");
-      const data = await validarOtsControlSapEnApi({ password, semana, central, ordenesFile, avisosFile });
+      const data = await validarMaestrosControlSapEnApi({ semana, central });
       setResultado(data);
-      avisar("Validación SAP completada.");
     } catch (err) {
-      console.error("Error validando Control SAP:", err);
-      avisar(`No se pudo validar: ${err.message || "error desconocido"}`, "err");
+      console.error("Error validando con maestros SAP:", err);
+      setResultado(null);
+      avisar(`No se pudo validar con maestros SAP: ${err.message || "error desconocido"}`, "err");
     } finally {
       setValidando(false);
+    }
+  }, [semana, central]);
+
+  useEffect(() => {
+    validarConMaestros();
+  }, [validarConMaestros]);
+
+  const cargarMaestroOts = async () => {
+    if (!adminPassword.trim()) return avisar("Ingresa la clave de administrador SAP.", "err");
+    if (!adminOrdenesFile) return avisar("Selecciona el Excel SAP de OTs.", "err");
+    if (adminOrdenesFile.size > MAX_SAP_FILE) return avisar(`El archivo de OTs supera ${fmtKB(MAX_SAP_FILE)}.`, "err");
+
+    try {
+      setCargandoOts(true);
+      avisar("Cargando maestro de OTs...");
+      const data = await cargarMaestroOtsControlSapEnApi({ password: adminPassword, file: adminOrdenesFile });
+      setAdminResumen((prev) => ({ ...(prev || {}), ots: data }));
+      avisar("Maestro de OTs cargado. Revalidando...");
+      await validarConMaestros();
+    } catch (err) {
+      console.error("Error cargando maestro de OTs:", err);
+      avisar(`No se pudo cargar maestro de OTs: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setCargandoOts(false);
+    }
+  };
+
+  const cargarMaestroAvisos = async () => {
+    if (!adminPassword.trim()) return avisar("Ingresa la clave de administrador SAP.", "err");
+    if (!adminAvisosFile) return avisar("Selecciona el Excel SAP de Avisos.", "err");
+    if (adminAvisosFile.size > MAX_SAP_FILE) return avisar(`El archivo de avisos supera ${fmtKB(MAX_SAP_FILE)}.`, "err");
+
+    try {
+      setCargandoAvisos(true);
+      avisar("Cargando maestro de avisos...");
+      const data = await cargarMaestroAvisosControlSapEnApi({ password: adminPassword, file: adminAvisosFile });
+      setAdminResumen((prev) => ({ ...(prev || {}), avisos: data }));
+      avisar("Maestro de avisos cargado. Revalidando...");
+      await validarConMaestros();
+    } catch (err) {
+      console.error("Error cargando maestro de avisos:", err);
+      avisar(`No se pudo cargar maestro de avisos: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setCargandoAvisos(false);
     }
   };
 
@@ -2031,6 +2129,20 @@ function ControlSapPage({ notify }) {
     lineHeight: 1.15,
   };
 
+  const uploadBox = (file, label, onChange) => (
+    <div style={{ position: "relative" }}>
+      <div style={{ padding: "10px 12px", border: `1.5px dashed ${file ? C.green : C.orange}`, borderRadius: 8, color: file ? C.green : C.orange, fontWeight: 700, background: file ? C.greenBg : C.white }}>
+        {file ? `${file.name} · ${fmtKB(file.size)}` : label}
+      </div>
+      <input
+        type="file"
+        accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+        onChange={(e) => onChange(e.target.files?.[0] || null)}
+        style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
+      />
+    </div>
+  );
+
   return (
     <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT, color: C.navy }}>
       <style>{`
@@ -2055,166 +2167,123 @@ function ControlSapPage({ notify }) {
       </header>
 
       <main style={{ maxWidth: 1440, margin: "0 auto", padding: "22px 16px 60px" }}>
-        <h3 style={sectionTitle}>Validación privada de OTs</h3>
+        <h3 style={sectionTitle}>Validación automática contra maestros SAP</h3>
 
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(170px, 240px) minmax(220px, 1fr) minmax(220px, 1fr) auto", gap: 12, alignItems: "end" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Clave</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Clave de Control SAP"
-                style={{ width: "100%", marginTop: 6, padding: "10px 12px", border: `1px solid ${C.line}`, borderRadius: 8, boxSizing: "border-box" }}
-              />
-            </div>
-
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Archivo SAP de Órdenes</label>
-              <div style={{ marginTop: 6, position: "relative" }}>
-                <div style={{ padding: "10px 12px", border: `1.5px dashed ${ordenesFile ? C.green : C.orange}`, borderRadius: 8, color: ordenesFile ? C.green : C.orange, fontWeight: 700, background: ordenesFile ? C.greenBg : C.white }}>
-                  {ordenesFile ? `${ordenesFile.name} · ${fmtKB(ordenesFile.size)}` : "Seleccionar Excel SAP de OTs"}
-                </div>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
-                  onChange={(e) => setOrdenesFile(e.target.files?.[0] || null)}
-                  style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
-                />
+              <div style={{ fontWeight: 800, color: C.navy }}>
+                La validación usa los maestros de OTs y Avisos ya cargados en Supabase.
               </div>
-            </div>
-
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Archivo SAP de Avisos</label>
-              <div style={{ marginTop: 6, position: "relative" }}>
-                <div style={{ padding: "10px 12px", border: `1.5px dashed ${avisosFile ? C.green : C.orange}`, borderRadius: 8, color: avisosFile ? C.green : C.orange, fontWeight: 700, background: avisosFile ? C.greenBg : C.white }}>
-                  {avisosFile ? `${avisosFile.name} · ${fmtKB(avisosFile.size)}` : "Seleccionar Excel SAP de Avisos (opcional)"}
-                </div>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
-                  onChange={(e) => setAvisosFile(e.target.files?.[0] || null)}
-                  style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
-                />
+              <div style={{ fontSize: 13, color: C.slate, marginTop: 4 }}>
+                No requiere clave ni subir archivos. La clave solo se usa en Administración SAP para actualizar maestros.
               </div>
+              {resultado && (
+                <div style={{ fontSize: 12, color: C.slate, marginTop: 6 }}>
+                  Fuente OTs: {resultado.archivo_ordenes || "—"} · Fuente Avisos: {resultado.archivo_avisos || "—"}
+                </div>
+              )}
             </div>
-
             <button
-              onClick={validar}
+              onClick={validarConMaestros}
               disabled={validando}
-              style={{ background: validando ? C.slate : C.orange, color: C.white, border: "none", borderRadius: 8, padding: "12px 18px", fontWeight: 900, whiteSpace: "nowrap" }}
+              style={{ background: validando ? C.slate : C.orange, color: C.white, border: "none", borderRadius: 8, padding: "11px 16px", fontWeight: 900 }}
             >
-              {validando ? "Validando..." : "Validar OTs/Avisos"}
+              {validando ? "Validando..." : "Revalidar contra SAP"}
             </button>
-          </div>
-          <div style={{ marginTop: 8, fontSize: 12, color: C.slate }}>
-            El archivo de avisos mejora el cruce cuando el proveedor colocó un aviso en vez de una OT o cuando la OT aún no fue generada.
           </div>
         </div>
 
+        {validando && !resultado && (
+          <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 18, color: C.slate, marginBottom: 20 }}>
+            Validando automáticamente contra maestros SAP...
+          </div>
+        )}
+
         {resultado && (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(130px, 1fr))", gap: 12, marginBottom: 18 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginBottom: 20 }}>
               {[
-                ["Actividades revisadas", resumen.actividades_revisadas || 0, C.navy],
-                ["OTs OK", resumen.ots_ok || 0, C.green],
-                ["Avisos como OT", resumen.avisos_como_ot || 0, C.amber],
-                ["No encontradas", resumen.no_encontradas || 0, C.red],
-                ["Sugeridas", resumen.sugeridas || 0, C.blue],
-                ["Estado no operativo", resumen.estado_no_operativo || 0, C.red],
-              ].map(([t, v, col]) => (
+                [resumen.actividades_revisadas || 0, "Actividades revisadas", C.navy, ""],
+                [resumen.ots_ok || 0, "OTs OK", C.green, "Ocultas por defecto"],
+                [resumen.avisos_como_ot || 0, "Avisos como OT", C.amber, ""],
+                [resumen.avisos_sin_ot || 0, "Avisos sin OT", C.amber, ""],
+                [resumen.no_encontradas || 0, "No encontradas", C.red, ""],
+                [resumen.sugeridas || 0, "Sugeridas", C.blue, ""],
+                [resumen.estado_no_operativo || 0, "Estado no operativo", C.red, ""],
+              ].map(([v, t, col, sub]) => (
                 <button
                   key={t}
-                  type="button"
-                  onClick={() => {
-                    if (t === "OTs OK") setMostrarOk((prev) => !prev);
-                  }}
-                  title={t === "OTs OK" ? "Click para mostrar/ocultar las OTs OK" : ""}
-                  style={{
-                    textAlign: "left",
-                    background: t === "OTs OK" && mostrarOk ? C.greenBg : C.white,
-                    border: t === "OTs OK" && mostrarOk ? `1.5px solid ${C.green}` : `1px solid ${C.line}`,
-                    borderRadius: 10,
-                    padding: "12px 14px",
-                    cursor: t === "OTs OK" ? "pointer" : "default",
-                  }}
+                  onClick={() => t === "OTs OK" && setMostrarOk((x) => !x)}
+                  style={{ textAlign: "left", background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: "13px 16px", minHeight: 78 }}
                 >
                   <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 26, color: col }}>{v}</div>
-                  <div style={{ fontSize: 12, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>{t}</div>
-                  {t === "OTs OK" && (
-                    <div style={{ fontSize: 11, color: C.slate, marginTop: 4 }}>
-                      {mostrarOk ? "Mostrando OK" : "Ocultas por defecto"}
-                    </div>
-                  )}
+                  <div style={{ fontSize: 12, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 800 }}>{t}</div>
+                  {sub && <div style={{ fontSize: 11, color: C.slate, marginTop: 3 }}>{mostrarOk && t === "OTs OK" ? "Mostrando" : sub}</div>}
                 </button>
               ))}
             </div>
 
-            <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden", marginBottom: 22 }}>
+            <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden", marginBottom: 24 }}>
               <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed", fontSize: 12 }}>
                 <colgroup>
                   <col style={{ width: "9%" }} />
                   <col style={{ width: "7%" }} />
                   <col style={{ width: "7%" }} />
                   <col style={{ width: "8%" }} />
-                  <col style={{ width: "7%" }} />
-                  <col style={{ width: "19%" }} />
-                  <col style={{ width: "17%" }} />
-                  <col style={{ width: "17%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "11%" }} />
+                  <col style={{ width: "20%" }} />
                   <col style={{ width: "9%" }} />
+                  <col style={{ width: "13%" }} />
                 </colgroup>
                 <thead>
                   <tr>
-                    {["Empresa / fila", "OT PMS", "Aviso", "Pedido", "Unidad", "Actividad PMS", "SAP encontrado", "Sugerencia", "Acción"].map((h) => (
-                      <th key={h} style={thCompact}>{h}</th>
-                    ))}
+                    {["Nivel / Empresa", "N° PMS", "Aviso", "Unidad", "Actividad PMS", "OT / COD / Pedido", "Referencia SAP", "Score", "Acciones"].map((h) => <th key={h} style={thCompact}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {filasVisibles.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} style={{ ...celda, padding: 18, color: C.slate, textAlign: "center" }}>
-                        No hay observaciones pendientes para mostrar. Las OTs OK están ocultas por defecto. Haz click en la tarjeta “OTs OK” para verlas.
-                      </td>
-                    </tr>
+                    <tr><td colSpan={9} style={{ padding: 18, color: C.slate }}>No hay observaciones para mostrar. Las OTs OK están ocultas por defecto.</td></tr>
                   ) : filasVisibles.map((fila, idx) => {
                     const key = filaKey(fila, idx);
+                    const estado = String(fila.estado || "").toUpperCase();
+                    const esOk = estado === "OK" || estado === "ACTUALIZADA";
+                    const esError = ["NO_ENCONTRADA", "ESTADO_NO_OPERATIVO", "AVISO_NO_OPERATIVO"].includes(estado);
+                    const bg = esOk ? C.greenBg : esError ? C.redBg : C.greenBg;
+                    const colEstado = esOk ? C.green : esError ? C.red : C.amber;
                     const manual = manualPorFila[key] || "";
-                    const estadoColor = fila.estado === "OK" || fila.estado === "ACTUALIZADA" ? C.green : fila.estado === "NO_ENCONTRADA" ? C.red : C.amber;
-                    const yaPreparado = cambiosPreparados.some((x) => x.key === key);
+                    const otSugerida = fila.ot_sugerida || fila.ot_sap || "";
+                    const codPm = fila.cod_pm_sugerido || fila.cod_pm_sap || fila.plan_pm_sap || fila.aviso_sap || "";
+                    const pedido = fila.pedido_sugerido || fila.pedido_sap || fila.pedido_detectado || "";
+
                     return (
-                      <tr key={key} style={{ background: yaPreparado ? C.greenBg : C.white }}>
-                        <td style={celda}>
-                          <div style={{ fontWeight: 900, color: estadoColor }}>{fila.estado || "—"}</div>
-                          <div style={{ fontWeight: 800 }}>{fila.empresa || "—"}</div>
-                          <div style={{ color: C.slate }}>Fila {fila.fila_excel || "—"}</div>
+                      <tr key={key} style={{ background: bg }}>
+                        <td style={{ ...celda, color: colEstado, fontWeight: 900 }}>
+                          <div>{estado || "OBS"}</div>
+                          <div style={{ color: C.navy }}>{fila.empresa || "—"}</div>
+                          <div style={{ color: C.slate, fontWeight: 500 }}>Fila {fila.fila_excel || "—"}</div>
                         </td>
                         <td style={{ ...celda, fontWeight: 800 }}>{fila.numero_pms || "—"}</td>
                         <td style={celda}>{fila.aviso_sap || fila.aviso_pms || "—"}</td>
-                        <td style={celda}>{fila.pedido_detectado || fila.pedido_pms || fila.pedido_sugerido || "—"}</td>
                         <td style={celda}>{fila.unidad_pms || "—"}</td>
                         <td style={celda}>
                           <div>{fila.actividad_pms || "—"}</div>
-                          <div style={{ color: C.slate, fontSize: 11, marginTop: 4 }}>{fila.observacion}</div>
+                          <div style={{ color: C.slate, marginTop: 3 }}>{fila.observacion || "—"}</div>
                         </td>
                         <td style={celda}>
-                          <div style={{ fontWeight: 800 }}>{fila.ot_sap || "—"}</div>
-                          <div>{fila.descripcion_sap || "—"}</div>
+                          <strong>OT:</strong> {otSugerida || "—"}<br />
+                          <strong>COD PM/AVISO:</strong> {codPm || "—"}<br />
+                          <strong>Pedido:</strong> {pedido || "—"}
                         </td>
+                        <td style={celda}>{fila.descripcion_sugerida || fila.descripcion_sap || "—"}</td>
+                        <td style={celda}>{fila.score_sugerencia ?? "—"}</td>
                         <td style={celda}>
-                          <div><b>OT:</b> <span style={{ color: fila.ot_sugerida ? C.green : C.slate, fontWeight: 900 }}>{fila.ot_sugerida || "—"}</span></div>
-                          <div><b>COD PM/AVISO:</b> {fila.cod_pm_sugerido || fila.cod_pm_sap || fila.plan_pm_sap || "—"}</div>
-                          <div><b>Pedido:</b> {fila.pedido_sugerido || fila.pedido_detectado || fila.pedido_sap || "—"}</div>
-                          <div style={{ color: C.slate, marginTop: 4 }}>{fila.descripcion_sugerida || "—"}</div>
-                          <div style={{ color: C.slate, fontSize: 11, marginTop: 4 }}>Score: {fila.score_sugerencia || 0}</div>
-                        </td>
-                        <td style={celda}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ display: "grid", gap: 6 }}>
                             <button
-                              disabled={!fila.ot_sugerida}
-                              onClick={() => prepararCambio(fila, "SUGERIDA", fila.ot_sugerida)}
-                              style={{ background: !fila.ot_sugerida ? C.slate : C.green, color: C.white, border: "none", borderRadius: 6, padding: "7px 8px", fontWeight: 800 }}
+                              disabled={!otSugerida && estado !== "AVISO_SIN_OT"}
+                              onClick={() => prepararCambio(fila, estado === "AVISO_SIN_OT" ? "MANTENER" : "SUGERIDA", otSugerida || fila.numero_pms)}
+                              style={{ background: (!otSugerida && estado !== "AVISO_SIN_OT") ? C.slate : C.green, color: C.white, border: "none", borderRadius: 6, padding: "7px 8px", fontWeight: 800 }}
                             >
                               Cambiar
                             </button>
@@ -2222,7 +2291,7 @@ function ControlSapPage({ notify }) {
                               value={manual}
                               onChange={(e) => setManualPorFila((prev) => ({ ...prev, [key]: e.target.value }))}
                               placeholder="OT manual"
-                              style={{ width: "100%", padding: "7px 8px", border: `1px solid ${C.line}`, borderRadius: 6, boxSizing: "border-box" }}
+                              style={{ width: "100%", boxSizing: "border-box", padding: "7px 8px", border: `1px solid ${C.line}`, borderRadius: 6 }}
                             />
                             <button
                               disabled={!manual.trim()}
@@ -2306,7 +2375,7 @@ function ControlSapPage({ notify }) {
               </div>
             )}
 
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 26 }}>
               <button
                 onClick={aplicarCambiosEstructura}
                 disabled={cambiosPreparados.length === 0}
@@ -2325,6 +2394,53 @@ function ControlSapPage({ notify }) {
             </div>
           </>
         )}
+
+        <h3 style={sectionTitle}>Administración SAP</h3>
+        <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16 }}>
+          <p style={{ margin: "0 0 12px", color: C.slate, fontSize: 13 }}>
+            Solo administrador: actualiza los maestros semanales de OTs y Avisos. Estos archivos se guardan en Supabase y luego la validación se ejecuta automáticamente.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 260px) minmax(220px, 1fr) auto minmax(220px, 1fr) auto", gap: 12, alignItems: "end" }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Clave admin</label>
+              <input
+                type="password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                placeholder="Clave SAP"
+                style={{ width: "100%", marginTop: 6, padding: "10px 12px", border: `1px solid ${C.line}`, borderRadius: 8, boxSizing: "border-box" }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Maestro OTs</label>
+              <div style={{ marginTop: 6 }}>{uploadBox(adminOrdenesFile, "Seleccionar Excel SAP de OTs", setAdminOrdenesFile)}</div>
+            </div>
+            <button
+              onClick={cargarMaestroOts}
+              disabled={cargandoOts || !adminOrdenesFile}
+              style={{ background: cargandoOts || !adminOrdenesFile ? C.slate : C.green, color: C.white, border: "none", borderRadius: 8, padding: "11px 14px", fontWeight: 900 }}
+            >
+              {cargandoOts ? "Cargando..." : "Cargar OTs"}
+            </button>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 800, color: C.slate, textTransform: "uppercase", letterSpacing: 0.5 }}>Maestro Avisos</label>
+              <div style={{ marginTop: 6 }}>{uploadBox(adminAvisosFile, "Seleccionar Excel SAP de Avisos", setAdminAvisosFile)}</div>
+            </div>
+            <button
+              onClick={cargarMaestroAvisos}
+              disabled={cargandoAvisos || !adminAvisosFile}
+              style={{ background: cargandoAvisos || !adminAvisosFile ? C.slate : C.green, color: C.white, border: "none", borderRadius: 8, padding: "11px 14px", fontWeight: 900 }}
+            >
+              {cargandoAvisos ? "Cargando..." : "Cargar Avisos"}
+            </button>
+          </div>
+          {adminResumen && (
+            <div style={{ marginTop: 12, color: C.slate, fontSize: 12 }}>
+              {adminResumen.ots && <div>Última carga OTs: {adminResumen.ots.archivo_fuente || "archivo"}</div>}
+              {adminResumen.avisos && <div>Última carga Avisos: {adminResumen.avisos.archivo_fuente || "archivo"}</div>}
+            </div>
+          )}
+        </div>
       </main>
 
       {localToast && (
@@ -2350,6 +2466,7 @@ function ControlSapPage({ notify }) {
     </div>
   );
 }
+
 
 // ─── Maestro SAP y validación contra SAP ───
 function SapControlSection({ wk, filtroCentral, centralActualLabel, notify }) {
