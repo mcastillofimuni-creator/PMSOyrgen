@@ -462,6 +462,9 @@ export default function App() {
   const [empresas, setEmpresas] = useState(EMPRESAS_DEFAULT);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const [mostrarValidacionOt, setMostrarValidacionOt] = useState(false);
+  const [mostrarProgramacionOt, setMostrarProgramacionOt] = useState(false);
+  const [centralControlOt, setCentralControlOt] = useState("SANTA ROSA");
 
   const wk = weekInfo(offset);
   const params = new URLSearchParams(window.location.search);
@@ -839,6 +842,8 @@ export default function App() {
           {[
             ["proveedor", "Registrar programa"],
             ["supervisor", "Panel de la reunión"],
+            ...(mostrarValidacionOt ? [["control_sap", "Validación de OTs"]] : []),
+            ...(mostrarProgramacionOt ? [["control_ot", "Programación semanal OT"]] : []),
           ].map(([key, label]) => (
             <button
               key={key}
@@ -871,6 +876,25 @@ export default function App() {
             }}
             notify={notify}
           />
+        ) : tab === "control_sap" ? (
+          <ControlSapPage
+            notify={notify}
+            semanaProp={wk.id}
+            centralProp={centralControlOt}
+            pmsProp={String(getNumeroPms(wk.id) || "")}
+            rangoProp={fmtRango(wk)}
+            onVerProgramacionSemanal={() => {
+              setMostrarProgramacionOt(true);
+              setTab("control_ot");
+            }}
+          />
+        ) : tab === "control_ot" ? (
+          <ControlOtSemanal
+            wk={wk}
+            centralInicial={centralControlOt}
+            onGenerarPmsUnico={descargarPmsUnico}
+            notify={notify}
+          />
         ) : (
           <Panel
             wk={wk}
@@ -883,6 +907,11 @@ export default function App() {
             onDownload={downloadFile}
             onSaveEmpresas={saveEmpresas}
             onGenerarPmsUnico={descargarPmsUnico}
+            onOpenControlSap={(central) => {
+              setCentralControlOt(central || "SANTA ROSA");
+              setMostrarValidacionOt(true);
+              setTab("control_sap");
+            }}
             onRevalidar={revalidarSub}
             onReplaceFile={replaceFileSub}
             notify={notify}
@@ -1205,6 +1234,7 @@ function Panel({
   onDownload,
   onSaveEmpresas,
   onGenerarPmsUnico,
+  onOpenControlSap,
   onRevalidar,
   onReplaceFile,
   notify,
@@ -1372,28 +1402,48 @@ function Panel({
           </div>
         </div>
 
-        <button
-          onClick={() =>
-            onGenerarPmsUnico({
-              semana: wk.id,
-              central: filtroCentral,
-            })
-          }
-          disabled={visibleSubs.length === 0}
-          style={{
-            background: visibleSubs.length === 0 ? C.slate : C.green,
-            color: C.white,
-            border: "none",
-            borderRadius: 8,
-            padding: "11px 16px",
-            fontSize: 14,
-            fontWeight: 800,
-            whiteSpace: "nowrap",
-            opacity: visibleSubs.length === 0 ? 0.65 : 1,
-          }}
-        >
-          Descargar PMS único
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button
+            onClick={() => onOpenControlSap?.(filtroCentral)}
+            disabled={visibleSubs.length === 0}
+            style={{
+              background: visibleSubs.length === 0 ? C.slate : C.navy,
+              color: C.white,
+              border: "none",
+              borderRadius: 8,
+              padding: "11px 16px",
+              fontSize: 14,
+              fontWeight: 800,
+              whiteSpace: "nowrap",
+              opacity: visibleSubs.length === 0 ? 0.65 : 1,
+            }}
+          >
+            Validar OTs SAP
+          </button>
+
+          <button
+            onClick={() =>
+              onGenerarPmsUnico({
+                semana: wk.id,
+                central: filtroCentral,
+              })
+            }
+            disabled={visibleSubs.length === 0}
+            style={{
+              background: visibleSubs.length === 0 ? C.slate : C.green,
+              color: C.white,
+              border: "none",
+              borderRadius: 8,
+              padding: "11px 16px",
+              fontSize: 14,
+              fontWeight: 800,
+              whiteSpace: "nowrap",
+              opacity: visibleSubs.length === 0 ? 0.65 : 1,
+            }}
+          >
+            Descargar PMS único
+          </button>
+        </div>
       </div>
 
       <h3 style={sectionTitle}>Matriz semanal · programado vs presentado</h3>
@@ -1750,12 +1800,617 @@ function Panel({
         wk={wk}
         filtroCentral={filtroCentral}
         centralActualLabel={centralActualLabel}
+        onOpenControlSap={onOpenControlSap}
       />
 
       <ActaSection wk={wk} subs={visibleSubs} empresas={empresas} faltantes={faltantes} centralActualLabel={centralActualLabel} filtroCentral={filtroCentral} notify={notify} />
     </div>
   );
 }
+
+
+function inferirEspecialidadControlOt(row) {
+  const inspector = String(row?.inspector || "").toUpperCase();
+  const texto = `${row?.actividad || ""} ${row?.sistema || ""} ${row?.equipo || ""}`.toUpperCase();
+
+  if (/(M\.CASTILLO|R\.SANDOVAL|FERNANDO SARMIENTO|E\.SALINAS|ELECTR|MOTOR|TABLERO|REL[EÉ]|CABLE|LUMINARIA|MCC|UPS|BATER[IÍ]A)/.test(inspector + " " + texto)) {
+    return "ELE";
+  }
+
+  if (/(M\.TASAYCO|P\.GARCIA|C\.HUAYNATE|C\.ESPINOZA|M\.GOMEZ|V\.ESPIRITU|INSTR|CONTROL|PLC|TRANSMISOR|PRESSURE|SWITCH|V[ÁA]LVULA DE CONTROL|SE[ÑN]AL)/.test(inspector + " " + texto)) {
+    return "I&C";
+  }
+
+  if (/(C\.LUQUE|J\.CACERES|F\.CASTRO|D\.HINOSTROZA|F\.ROJAS|MEC|BOMBA|V[ÁA]LVULA|ACOPLE|TUBER[IÍ]A|COMPRESOR|MONTAJE)/.test(inspector + " " + texto)) {
+    return "MEC";
+  }
+
+  return "—";
+}
+
+function fmtFechaControlOt(valor) {
+  if (!valor) return "";
+  if (valor instanceof Date && !Number.isNaN(valor.getTime())) {
+    return `${String(valor.getDate()).padStart(2, "0")}/${String(valor.getMonth() + 1).padStart(2, "0")}/${String(valor.getFullYear()).slice(-2)}`;
+  }
+  return String(valor);
+}
+
+function fechasProgramadasControlOt(row, wk) {
+  const dias = Array.isArray(row?.dias) ? row.dias : [];
+  if (!dias.length) return "";
+
+  return dias
+    .map((idx) => {
+      const d = wk?.dates?.[Number(idx)];
+      return d ? fmtFechaControlOt(d) : "";
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+async function guardarControlOtRow(payload, existenteId = null) {
+  if (existenteId) {
+    const { data, error } = await supabase
+      .from("pms_control_ot_semanal")
+      .update(payload)
+      .eq("id", existenteId)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from("pms_control_ot_semanal")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico, notify }) {
+  const [filtroCentral, setFiltroCentral] = useState(centralInicial || "SANTA ROSA");
+  const [actividades, setActividades] = useState([]);
+  const [controles, setControles] = useState([]);
+  const [sapOrdenes, setSapOrdenes] = useState({});
+  const [busqueda, setBusqueda] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState(null);
+
+  const centralActualLabel = CENTRALES.find((c) => c.value === filtroCentral)?.label || "C. T. Santa Rosa";
+
+  const cargarControlOt = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const { data: acts, error: actError } = await supabase
+        .from("pms_actividades")
+        .select("*")
+        .eq("semana", wk.id)
+        .order("proveedor", { ascending: true })
+        .order("fila_excel", { ascending: true });
+
+      if (actError) throw actError;
+
+      const filtradas = (acts || [])
+        .filter((a) => normalizarCentral(a.central) === filtroCentral)
+        .filter((a) => String(a.ot_grafo || "").trim())
+        .map((a) => ({
+          ...a,
+          orden_control: String(a.ot_grafo || "").trim(),
+          aviso_control: String(a.cod_pm_aviso || "").trim(),
+          descripcion_control: String(a.actividad || "").trim(),
+          unidad_control: String(a.unidad || "").trim(),
+          especialidad_control: inferirEspecialidadControlOt(a),
+          fecha_programada_control: fechasProgramadasControlOt(a, wk),
+        }));
+
+      const ordenes = Array.from(new Set(filtradas.map((a) => a.orden_control).filter(Boolean)));
+
+      let mapaSap = {};
+      if (ordenes.length) {
+        const { data: sapRows, error: sapError } = await supabase
+          .from("sap_ordenes_avisos")
+          .select("*")
+          .in("numero_ot", ordenes);
+
+        if (!sapError) {
+          mapaSap = (sapRows || []).reduce((acc, row) => {
+            if (row.numero_ot) acc[String(row.numero_ot)] = row;
+            return acc;
+          }, {});
+        }
+      }
+
+      const { data: ctrlRows, error: ctrlError } = await supabase
+        .from("pms_control_ot_semanal")
+        .select("*")
+        .eq("semana", wk.id)
+        .eq("central", filtroCentral)
+        .order("fecha_registro", { ascending: true });
+
+      if (ctrlError) throw ctrlError;
+
+      setActividades(filtradas);
+      setSapOrdenes(mapaSap);
+      setControles(ctrlRows || []);
+    } catch (err) {
+      console.error("Error cargando programación semanal OT:", err);
+      notify?.(`No se pudo cargar la programación OT: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setLoading(false);
+    }
+  }, [wk.id, wk.dates, filtroCentral, notify]);
+
+  useEffect(() => {
+    cargarControlOt();
+  }, [cargarControlOt]);
+
+  const controlPorActividad = controles.reduce((acc, row) => {
+    if (row.actividad_id) acc[row.actividad_id] = row;
+    return acc;
+  }, {});
+
+  const adicionales = controles.filter((row) => row.es_adicional);
+
+  const visible = actividades.filter((a) => {
+    const q = busqueda.trim().toUpperCase();
+    if (!q) return true;
+
+    return [
+      a.orden_control,
+      a.aviso_control,
+      a.descripcion_control,
+      a.unidad_control,
+      a.especialidad_control,
+      sapOrdenes[a.orden_control]?.estado_control,
+      sapOrdenes[a.orden_control]?.estado_orden,
+    ]
+      .join(" ")
+      .toUpperCase()
+      .includes(q);
+  });
+
+  const actualizarCampoBase = async (actividad, patch) => {
+    const actual = controlPorActividad[actividad.id];
+    const sap = sapOrdenes[actividad.orden_control] || {};
+    const payload = {
+      semana: wk.id,
+      central: filtroCentral,
+      actividad_id: actividad.id,
+      orden: actividad.orden_control,
+      descripcion: actividad.descripcion_control,
+      aviso: actividad.aviso_control,
+      unidad: actividad.unidad_control,
+      especialidad: actividad.especialidad_control,
+      fecha_programada: actividad.fecha_programada_control,
+      situacion: sap.estado_control || sap.estado_orden || "",
+      es_adicional: false,
+      marca: actual?.marca || "",
+      nota: actual?.nota || "",
+      ...patch,
+    };
+
+    try {
+      setSavingId(actividad.id);
+      const guardado = await guardarControlOtRow(payload, actual?.id || null);
+      setControles((prev) => {
+        const sinAnterior = prev.filter((r) => r.id !== guardado.id && r.actividad_id !== actividad.id);
+        return [...sinAnterior, guardado];
+      });
+      notify?.("Control OT actualizado.");
+    } catch (err) {
+      console.error("Error guardando control OT:", err);
+      notify?.(`No se pudo guardar el control OT: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const agregarAdicional = async () => {
+    try {
+      const payload = {
+        semana: wk.id,
+        central: filtroCentral,
+        actividad_id: null,
+        orden: "",
+        aviso: "",
+        descripcion: "",
+        unidad: "",
+        especialidad: "",
+        fecha_programada: "",
+        situacion: "",
+        marca: "",
+        nota: "",
+        es_adicional: true,
+      };
+
+      const guardado = await guardarControlOtRow(payload);
+      setControles((prev) => [...prev, guardado]);
+      notify?.("Fila adicional agregada.");
+    } catch (err) {
+      console.error("Error agregando fila adicional:", err);
+      notify?.(`No se pudo agregar la fila: ${err.message || "error desconocido"}`, "err");
+    }
+  };
+
+  const actualizarAdicional = async (row, patch) => {
+    const payload = { ...patch };
+
+    try {
+      setSavingId(row.id);
+      const guardado = await guardarControlOtRow(payload, row.id);
+      setControles((prev) => prev.map((r) => (r.id === row.id ? guardado : r)));
+    } catch (err) {
+      console.error("Error actualizando adicional:", err);
+      notify?.(`No se pudo guardar la fila adicional: ${err.message || "error desconocido"}`, "err");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const eliminarAdicional = async (row) => {
+    if (!window.confirm("¿Eliminar esta actividad adicional?")) return;
+
+    try {
+      const { error } = await supabase
+        .from("pms_control_ot_semanal")
+        .delete()
+        .eq("id", row.id);
+
+      if (error) throw error;
+      setControles((prev) => prev.filter((r) => r.id !== row.id));
+      notify?.("Actividad adicional eliminada.");
+    } catch (err) {
+      console.error("Error eliminando adicional:", err);
+      notify?.(`No se pudo eliminar: ${err.message || "error desconocido"}`, "err");
+    }
+  };
+
+  const marcaBtn = (label, value, current, onClick) => (
+    <button
+      onClick={onClick}
+      style={{
+        padding: "7px 9px",
+        border: `1px solid ${current === value ? C.green : C.line}`,
+        background: current === value ? C.green : C.white,
+        color: current === value ? C.white : C.slate,
+        fontWeight: 800,
+        borderRadius: 7,
+        fontSize: 12,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  const inputCell = {
+    width: "100%",
+    boxSizing: "border-box",
+    border: `1px solid ${C.line}`,
+    borderRadius: 6,
+    padding: "8px 9px",
+    fontSize: 13,
+    color: C.navy,
+    background: C.white,
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <h3 style={{ ...sectionTitle, margin: 0 }}>Programación semanal de OT</h3>
+        <BadgePms wk={wk} />
+        <span style={{ fontSize: 13, color: C.slate, fontWeight: 600 }}>{fmtRango(wk)}</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+        {CENTRALES.map((c) => (
+          <button
+            key={c.value}
+            onClick={() => setFiltroCentral(c.value)}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 999,
+              border: filtroCentral === c.value ? `1.5px solid ${C.orange}` : `1.5px solid ${C.line}`,
+              background: filtroCentral === c.value ? C.orangeBg : C.white,
+              color: filtroCentral === c.value ? C.orange : C.slate,
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      <div
+        style={{
+          background: C.white,
+          border: `1px solid ${C.line}`,
+          borderRadius: 10,
+          padding: "14px 16px",
+          marginBottom: 18,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.6 }}>
+            Control de cumplimiento · {centralActualLabel}
+          </div>
+          <div style={{ fontSize: 13, color: C.slate, marginTop: 3 }}>
+            Registra avance real del PMS: final, parcial, pendiente o actividades adicionales.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            onClick={cargarControlOt}
+            style={{
+              background: C.navy,
+              color: C.white,
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 14px",
+              fontSize: 13,
+              fontWeight: 800,
+            }}
+          >
+            Actualizar tabla
+          </button>
+
+          <button
+            onClick={() => onGenerarPmsUnico?.({ semana: wk.id, central: filtroCentral })}
+            style={{
+              background: C.green,
+              color: C.white,
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 14px",
+              fontSize: 13,
+              fontWeight: 800,
+            }}
+          >
+            Descargar PMS único
+          </button>
+        </div>
+      </div>
+
+      <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar orden, descripción, unidad, especialidad..."
+            style={{
+              flex: "1 1 260px",
+              border: `1px solid ${C.line}`,
+              borderRadius: 7,
+              padding: "10px 12px",
+              fontSize: 14,
+            }}
+          />
+
+          <span style={{ fontSize: 13, color: C.slate, fontWeight: 700 }}>
+            {visible.length} OT visibles · {adicionales.length} adicionales
+          </span>
+        </div>
+      </div>
+
+      {loading ? (
+        <Vacio texto="Cargando programación semanal de OT..." />
+      ) : (
+        <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, overflowX: "auto", marginBottom: 18 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1320, fontSize: 13 }}>
+            <thead>
+              <tr>
+                {["Orden", "Aviso", "Descripción", "Unidad", "Especialidad", "Fecha programada", "Situación", "Mi marca", "Nota"].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      background: C.navy,
+                      color: C.white,
+                      padding: "9px 10px",
+                      textAlign: "left",
+                      fontFamily: FONT_COND,
+                      fontSize: 14,
+                      letterSpacing: 0.4,
+                      textTransform: "uppercase",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+
+            <tbody>
+              {visible.map((a) => {
+                const ctrl = controlPorActividad[a.id] || {};
+                const sap = sapOrdenes[a.orden_control] || {};
+                const situacion = ctrl.situacion || sap.estado_control || sap.estado_orden || "—";
+                const marca = ctrl.marca || "";
+                const nota = ctrl.nota || "";
+                const saving = savingId === a.id;
+
+                return (
+                  <tr key={a.id} style={{ borderTop: `1px solid ${C.line}`, opacity: saving ? 0.65 : 1 }}>
+                    <td style={{ padding: 10, fontWeight: 800, verticalAlign: "top" }}>{a.orden_control}</td>
+                    <td style={{ padding: 10, fontWeight: 800, verticalAlign: "top" }}>{a.aviso_control || "—"}</td>
+                    <td style={{ padding: 10, minWidth: 260, verticalAlign: "top" }}>
+                      {a.descripcion_control || "—"}
+                      {a.proveedor && <div style={{ color: C.slate, fontSize: 12, marginTop: 3 }}>{a.proveedor}</div>}
+                    </td>
+                    <td style={{ padding: 10, verticalAlign: "top" }}>{a.unidad_control || "—"}</td>
+                    <td style={{ padding: 10, verticalAlign: "top" }}>{a.especialidad_control || "—"}</td>
+                    <td style={{ padding: 10, verticalAlign: "top" }}>{a.fecha_programada_control || "—"}</td>
+                    <td style={{ padding: 10, verticalAlign: "top" }}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          padding: "4px 8px",
+                          borderRadius: 999,
+                          background: /CERR|MECE/i.test(String(situacion)) ? C.redBg : C.greenBg,
+                          color: /CERR|MECE/i.test(String(situacion)) ? C.red : C.green,
+                          fontWeight: 800,
+                          fontSize: 12,
+                        }}
+                      >
+                        {situacion}
+                      </span>
+                    </td>
+                    <td style={{ padding: 10, minWidth: 185, verticalAlign: "top" }}>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                        {marcaBtn("Final", "FINAL", marca, () => actualizarCampoBase(a, { marca: "FINAL" }))}
+                        {marcaBtn("Parc", "PARCIAL", marca, () => actualizarCampoBase(a, { marca: "PARCIAL" }))}
+                        {marcaBtn("—", "", marca, () => actualizarCampoBase(a, { marca: "" }))}
+                      </div>
+                    </td>
+                    <td style={{ padding: 10, minWidth: 260, verticalAlign: "top" }}>
+                      <textarea
+                        defaultValue={nota}
+                        placeholder="Describe lo ejecutado, pendiente o interferencias..."
+                        onBlur={(e) => actualizarCampoBase(a, { nota: e.target.value })}
+                        rows={2}
+                        style={{ ...inputCell, resize: "vertical" }}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {adicionales.map((row) => (
+                <tr key={row.id} style={{ borderTop: `1px solid ${C.line}`, background: "#FFFCF8" }}>
+                  <td style={{ padding: 10, verticalAlign: "top" }}>
+                    <input
+                      defaultValue={row.orden || ""}
+                      onBlur={(e) => actualizarAdicional(row, { orden: e.target.value })}
+                      style={inputCell}
+                      placeholder="OT/Aviso"
+                    />
+                  </td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}>
+                    <input
+                      defaultValue={row.aviso || ""}
+                      onBlur={(e) => actualizarAdicional(row, { aviso: e.target.value })}
+                      style={inputCell}
+                      placeholder="Aviso/COD PM"
+                    />
+                  </td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}>
+                    <textarea
+                      defaultValue={row.descripcion || ""}
+                      onBlur={(e) => actualizarAdicional(row, { descripcion: e.target.value })}
+                      rows={2}
+                      style={{ ...inputCell, resize: "vertical" }}
+                      placeholder="Actividad adicional"
+                    />
+                  </td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}>
+                    <input
+                      defaultValue={row.unidad || ""}
+                      onBlur={(e) => actualizarAdicional(row, { unidad: e.target.value })}
+                      style={inputCell}
+                      placeholder="TG7"
+                    />
+                  </td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}>
+                    <input
+                      defaultValue={row.especialidad || ""}
+                      onBlur={(e) => actualizarAdicional(row, { especialidad: e.target.value })}
+                      style={inputCell}
+                      placeholder="ELE/MEC/I&C"
+                    />
+                  </td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}>
+                    <input
+                      defaultValue={row.fecha_programada || ""}
+                      onBlur={(e) => actualizarAdicional(row, { fecha_programada: e.target.value })}
+                      style={inputCell}
+                      placeholder="dd/mm/aa"
+                    />
+                  </td>
+                  <td style={{ padding: 10, verticalAlign: "top" }}>
+                    <input
+                      defaultValue={row.situacion || ""}
+                      onBlur={(e) => actualizarAdicional(row, { situacion: e.target.value })}
+                      style={inputCell}
+                      placeholder="Abierta/Cerrada"
+                    />
+                  </td>
+                  <td style={{ padding: 10, minWidth: 185, verticalAlign: "top" }}>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      {marcaBtn("Final", "FINAL", row.marca || "", () => actualizarAdicional(row, { marca: "FINAL" }))}
+                      {marcaBtn("Parc", "PARCIAL", row.marca || "", () => actualizarAdicional(row, { marca: "PARCIAL" }))}
+                      {marcaBtn("—", "", row.marca || "", () => actualizarAdicional(row, { marca: "" }))}
+                    </div>
+                  </td>
+                  <td style={{ padding: 10, minWidth: 300, verticalAlign: "top" }}>
+                    <textarea
+                      defaultValue={row.nota || ""}
+                      onBlur={(e) => actualizarAdicional(row, { nota: e.target.value })}
+                      rows={2}
+                      style={{ ...inputCell, resize: "vertical" }}
+                      placeholder="Nota de ejecución"
+                    />
+                    <button
+                      onClick={() => eliminarAdicional(row)}
+                      style={{
+                        marginTop: 8,
+                        background: "transparent",
+                        color: C.red,
+                        border: `1px solid ${C.red}`,
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        fontWeight: 800,
+                      }}
+                    >
+                      Eliminar fila
+                    </button>
+                  </td>
+                </tr>
+              ))}
+
+              {visible.length === 0 && adicionales.length === 0 && (
+                <tr>
+                  <td colSpan={9} style={{ padding: 22, color: C.slate, textAlign: "center" }}>
+                    No hay actividades con OT para {centralActualLabel}. Descarga o valida el PMS único antes de revisar esta tabla.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+        <button
+          onClick={agregarAdicional}
+          style={{
+            background: C.orange,
+            color: C.white,
+            border: "none",
+            borderRadius: 8,
+            padding: "11px 16px",
+            fontSize: 14,
+            fontWeight: 800,
+          }}
+        >
+          + Agregar actividad adicional
+        </button>
+      </div>
+    </div>
+  );
+}
+
 
 
 function ObservacionesBox({ observaciones, loading, total }) {
@@ -1910,15 +2565,9 @@ function ObservacionesBox({ observaciones, loading, total }) {
 
 
 
-function AbrirControlSapSection({ wk, filtroCentral, centralActualLabel }) {
+function AbrirControlSapSection({ wk, filtroCentral, centralActualLabel, onOpenControlSap }) {
   const abrir = () => {
-    const params = new URLSearchParams();
-    params.set("view", "control-sap");
-    params.set("semana", wk.id);
-    params.set("central", filtroCentral);
-    params.set("pms", String(getNumeroPms(wk.id) || ""));
-    params.set("rango", fmtRango(wk));
-    window.open(`${window.location.origin}${window.location.pathname}?${params.toString()}`, "_blank", "noopener,noreferrer");
+    onOpenControlSap?.(filtroCentral);
   };
 
   return (
@@ -1928,25 +2577,26 @@ function AbrirControlSapSection({ wk, filtroCentral, centralActualLabel }) {
           Control SAP OT/Avisos
         </div>
         <div style={{ fontSize: 13, color: C.slate, marginTop: 2 }}>
-          Abre una vista privada para validar las OTs del PMS {getNumeroPms(wk.id)} de {centralActualLabel}.
+          Valida las OTs, avisos y pedidos del PMS {getNumeroPms(wk.id)} de {centralActualLabel}.
         </div>
       </div>
       <button
         onClick={abrir}
         style={{ background: C.navy, color: C.white, border: "none", borderRadius: 8, padding: "11px 16px", fontSize: 14, fontWeight: 800, whiteSpace: "nowrap" }}
       >
-        Abrir control SAP
+        Validar OTs SAP
       </button>
     </div>
   );
 }
 
-function ControlSapPage({ notify }) {
+function ControlSapPage({ notify, semanaProp, centralProp, pmsProp, rangoProp, onVerProgramacionSemanal }) {
   const params = new URLSearchParams(window.location.search);
-  const semana = params.get("semana") || "";
-  const central = params.get("central") || "SANTA ROSA";
-  const pms = params.get("pms") || "";
-  const rango = params.get("rango") || semana;
+  const semana = semanaProp || params.get("semana") || "";
+  const central = centralProp || params.get("central") || "SANTA ROSA";
+  const pms = pmsProp || params.get("pms") || "";
+  const rango = rangoProp || params.get("rango") || semana;
+  const embebido = Boolean(semanaProp);
 
   const [validando, setValidando] = useState(false);
   const [resultado, setResultado] = useState(null);
@@ -2237,21 +2887,23 @@ function ControlSapPage({ notify }) {
         *:focus-visible { outline: 2px solid ${C.orange}; outline-offset: 2px; }
       `}</style>
 
-      <header style={{ background: C.navy, color: C.white, padding: "18px 22px" }}>
-        <div style={{ maxWidth: 1440, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 24, letterSpacing: 1, color: C.orangeLight, textTransform: "uppercase" }}>
-              Control SAP OT/Avisos
-            </span>
-            <span style={{ fontSize: 13, color: "#9AA7B2" }}>Vista privada · Planificación de Mantenimiento</span>
+      {!embebido && (
+        <header style={{ background: C.navy, color: C.white, padding: "18px 22px" }}>
+          <div style={{ maxWidth: 1440, margin: "0 auto" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: FONT_COND, fontWeight: 700, fontSize: 24, letterSpacing: 1, color: C.orangeLight, textTransform: "uppercase" }}>
+                Validación de OTs
+              </span>
+              <span style={{ fontSize: 13, color: "#9AA7B2" }}>Planificación de Mantenimiento</span>
+            </div>
+            <div style={{ marginTop: 8, fontSize: 14, color: "#C6D0DA" }}>
+              PMS {pms || "—"} · {etiquetaCentral(central)} · {rango}
+            </div>
           </div>
-          <div style={{ marginTop: 8, fontSize: 14, color: "#C6D0DA" }}>
-            PMS {pms || "—"} · {etiquetaCentral(central)} · {rango}
-          </div>
-        </div>
-      </header>
+        </header>
+      )}
 
-      <main style={{ maxWidth: 1440, margin: "0 auto", padding: "22px 16px 60px" }}>
+      <main style={{ maxWidth: embebido ? "100%" : 1440, margin: "0 auto", padding: embebido ? "0" : "22px 16px 60px" }}>
         <h3 style={sectionTitle}>Validación automática contra maestros SAP</h3>
 
         <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
@@ -2462,20 +3114,36 @@ function ControlSapPage({ notify }) {
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 26 }}>
               {cambiosAplicados && (
-                <button
-                  onClick={descargarPmsUnicoControl}
-                  disabled={descargandoPmsControl}
-                  style={{
-                    background: descargandoPmsControl ? C.slate : C.green,
-                    color: C.white,
-                    border: "none",
-                    borderRadius: 8,
-                    padding: "12px 18px",
-                    fontWeight: 900,
-                  }}
-                >
-                  {descargandoPmsControl ? "Generando PMS..." : "Descargar PMS único"}
-                </button>
+                <>
+                  <button
+                    onClick={() => onVerProgramacionSemanal?.()}
+                    style={{
+                      background: C.navy,
+                      color: C.white,
+                      border: "none",
+                      borderRadius: 8,
+                      padding: "12px 18px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    Ver programación semanal
+                  </button>
+
+                  <button
+                    onClick={descargarPmsUnicoControl}
+                    disabled={descargandoPmsControl}
+                    style={{
+                      background: descargandoPmsControl ? C.slate : C.green,
+                      color: C.white,
+                      border: "none",
+                      borderRadius: 8,
+                      padding: "12px 18px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    {descargandoPmsControl ? "Generando PMS..." : "Descargar PMS único"}
+                  </button>
+                </>
               )}
 
               <button
