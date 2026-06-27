@@ -1356,36 +1356,6 @@ function Panel({
         ))}
       </div>
 
-      <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, color: C.slate, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Especialidad
-        </span>
-        {[
-          ["TODAS", "Todas"],
-          ["MEC", "Mecánica"],
-          ["ELE", "Electricidad"],
-          ["I&C", "Instrumentación"],
-        ].map(([value, label]) => {
-          const on = filtroEspecialidad === value;
-          return (
-            <button
-              key={value}
-              onClick={() => setFiltroEspecialidad(value)}
-              style={{
-                padding: "8px 13px",
-                borderRadius: 999,
-                border: on ? `1.5px solid ${C.green}` : `1.5px solid ${C.line}`,
-                background: on ? C.green : C.white,
-                color: on ? C.white : C.slate,
-                fontWeight: 800,
-                fontSize: 13,
-              }}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
         {[
