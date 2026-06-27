@@ -1356,6 +1356,37 @@ function Panel({
         ))}
       </div>
 
+      <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: C.slate, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>
+          Especialidad
+        </span>
+        {[
+          ["TODAS", "Todas"],
+          ["MEC", "Mecánica"],
+          ["ELE", "Electricidad"],
+          ["I&C", "Instrumentación"],
+        ].map(([value, label]) => {
+          const on = filtroEspecialidad === value;
+          return (
+            <button
+              key={value}
+              onClick={() => setFiltroEspecialidad(value)}
+              style={{
+                padding: "8px 13px",
+                borderRadius: 999,
+                border: on ? `1.5px solid ${C.green}` : `1.5px solid ${C.line}`,
+                background: on ? C.green : C.white,
+                color: on ? C.white : C.slate,
+                fontWeight: 800,
+                fontSize: 13,
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
         {[
           [`Programas recibidos · ${centralActualLabel}`, visibleSubs.length, C.navy],
@@ -1877,6 +1908,7 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
   const [actividades, setActividades] = useState([]);
   const [sapOrdenes, setSapOrdenes] = useState({});
   const [busqueda, setBusqueda] = useState("");
+  const [filtroEspecialidad, setFiltroEspecialidad] = useState("TODAS");
   const [loading, setLoading] = useState(true);
   const [marcas, setMarcas] = useState({});
   const [adicionales, setAdicionales] = useState([]);
@@ -1941,6 +1973,12 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
   }, [cargarControlOt]);
 
   const visible = actividades.filter((a) => {
+    const esp = String(a.especialidad_control || "").toUpperCase();
+
+    if (filtroEspecialidad !== "TODAS" && esp !== filtroEspecialidad) {
+      return false;
+    }
+
     const q = busqueda.trim().toUpperCase();
     if (!q) return true;
 
@@ -2130,7 +2168,7 @@ function ControlOtSemanal({ wk, centralInicial = "SANTA ROSA", onGenerarPmsUnico
 
       <div style={{ background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar orden, aviso, descripción, unidad, especialidad..." style={{ ...inputCell, flex: "1 1 420px" }} />
+          <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar orden, aviso, descripción, unidad..." style={{ ...inputCell, flex: "1 1 420px" }} />
           <div style={{ fontWeight: 800, color: C.slate }}>
             {visible.length} OT visibles · {adicionales.length} adicionales · {filasParaNotificar.length} para notificar
           </div>
